@@ -1,0 +1,34 @@
+{
+  "name": "WF-AUX Daily Domain Limit Reset",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 0 * * *" }]
+        }
+      },
+      "id": "midnight-cron",
+      "name": "Daily Midnight BRT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "typeVersion": 1.2,
+      "notes": "Runs at 00:00 BRT (03:00 UTC) daily"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reset sent_today to 0 for all email domains\n// Uses Supabase RPC or direct SQL\nreturn [{\n  json: {\n    query: 'UPDATE email_domains SET sent_today = 0',\n    reset_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "reset-counters",
+      "name": "Reset Domain Counters",
+      "type": "n8n-nodes-base.code",
+      "position": [500, 300],
+      "typeVersion": 2,
+      "notes": "CONFIGURE: Replace with Supabase update query to reset sent_today = 0 for all domains"
+    }
+  ],
+  "connections": {
+    "Daily Midnight BRT": { "main": [[{ "node": "Reset Domain Counters", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "outbound" }, { "name": "leveron" }, { "name": "auxiliary" }]
+}

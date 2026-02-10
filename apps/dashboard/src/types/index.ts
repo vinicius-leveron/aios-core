@@ -155,6 +155,7 @@ export type SidebarView =
   | 'bob'
   | 'terminals'
   | 'monitor'
+  | 'outbound'
   | 'roadmap'
   | 'context'
   | 'ideas'
@@ -216,6 +217,7 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
   { id: 'bob', label: 'Bob', icon: 'bot', href: '/bob', shortcut: 'B' },
   { id: 'terminals', label: 'Terminals', icon: 'terminal', href: '/terminals', shortcut: 'T' },
   { id: 'monitor', label: 'Monitor', icon: 'activity', href: '/monitor', shortcut: 'M' },
+  { id: 'outbound', label: 'Outbound', icon: 'send', href: '/outbound', shortcut: 'O' },
   { id: 'insights', label: 'Insights', icon: 'trending-up', href: '/insights', shortcut: 'I' },
   { id: 'context', label: 'Context', icon: 'brain', href: '/context', shortcut: 'C' },
   { id: 'roadmap', label: 'Roadmap', icon: 'map', href: '/roadmap', shortcut: 'R' },

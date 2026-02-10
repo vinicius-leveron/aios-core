@@ -1,0 +1,160 @@
+{
+  "name": "WF-08 Dashboard & Weekly Reporter",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 8 * * 1" }]
+        }
+      },
+      "id": "weekly-cron",
+      "name": "Weekly Monday 8AM BRT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "typeVersion": 1.2,
+      "notes": "Generates weekly report every Monday at 8AM BRT (11:00 UTC)"
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "dashboard-report",
+        "responseMode": "responseNode"
+      },
+      "id": "manual-trigger",
+      "name": "Manual Report Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 500],
+      "typeVersion": 2,
+      "notes": "GET to generate report on-demand"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Define report period (last 7 days)\nconst now = new Date();\nconst weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);\n\nreturn [{\n  json: {\n    period_start: weekAgo.toISOString(),\n    period_end: now.toISOString(),\n    generated_at: now.toISOString()\n  }\n}];"
+      },
+      "id": "set-period",
+      "name": "Set Report Period",
+      "type": "n8n-nodes-base.code",
+      "position": [500, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "schema": "public",
+        "table": "pipeline_view",
+        "returnAll": true
+      },
+      "id": "fetch-pipeline",
+      "name": "Fetch Pipeline View",
+      "type": "n8n-nodes-base.supabase",
+      "position": [750, 200],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      },
+      "notes": "Uses pipeline_view from 008_create_views.sql"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "schema": "public",
+        "table": "cadence_performance",
+        "returnAll": true
+      },
+      "id": "fetch-cadence-perf",
+      "name": "Fetch Cadence Performance",
+      "type": "n8n-nodes-base.supabase",
+      "position": [750, 400],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      },
+      "notes": "Uses cadence_performance view"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "schema": "public",
+        "table": "domain_health",
+        "returnAll": true
+      },
+      "id": "fetch-domain-health",
+      "name": "Fetch Domain Health",
+      "type": "n8n-nodes-base.supabase",
+      "position": [750, 600],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      },
+      "notes": "Uses domain_health view"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compile weekly report from all data sources\nconst period = $('Set Report Period').first().json;\nconst pipeline = $('Fetch Pipeline View').all().map(i => i.json);\nconst cadence = $('Fetch Cadence Performance').all().map(i => i.json);\nconst domains = $('Fetch Domain Health').all().map(i => i.json);\n\n// Pipeline summary\nconst pipelineSummary = {};\nfor (const row of pipeline) {\n  pipelineSummary[row.status] = (pipelineSummary[row.status] || 0) + Number(row.count || 1);\n}\n\n// Calculate totals\nconst totalLeads = Object.values(pipelineSummary).reduce((a, b) => a + b, 0);\nconst inCadence = pipelineSummary['in_cadence'] || 0;\nconst replied = pipelineSummary['replied'] || 0;\nconst bounced = pipelineSummary['bounced'] || 0;\nconst enriched = pipelineSummary['enriched'] || 0;\n\n// Cadence metrics\nlet totalSent = 0;\nlet totalOpened = 0;\nlet totalClicked = 0;\nlet totalReplied = 0;\n\nfor (const c of cadence) {\n  totalSent += Number(c.emails_sent || 0);\n  totalOpened += Number(c.emails_opened || 0);\n  totalClicked += Number(c.emails_clicked || 0);\n  totalReplied += Number(c.emails_replied || 0);\n}\n\nconst openRate = totalSent > 0 ? ((totalOpened / totalSent) * 100).toFixed(1) : '0.0';\nconst clickRate = totalSent > 0 ? ((totalClicked / totalSent) * 100).toFixed(1) : '0.0';\nconst replyRate = totalSent > 0 ? ((totalReplied / totalSent) * 100).toFixed(1) : '0.0';\n\n// Domain health\nconst domainSummary = domains.map(d => ({\n  domain: d.domain,\n  sent_today: d.sent_today,\n  daily_limit: d.daily_limit,\n  reputation: d.reputation_score,\n  utilization: d.daily_limit > 0 ? ((d.sent_today / d.daily_limit) * 100).toFixed(0) + '%' : '0%'\n}));\n\n// Build report\nconst report = {\n  period: {\n    start: period.period_start,\n    end: period.period_end\n  },\n  pipeline: {\n    total_leads: totalLeads,\n    by_status: pipelineSummary\n  },\n  email_metrics: {\n    total_sent: totalSent,\n    total_opened: totalOpened,\n    total_clicked: totalClicked,\n    total_replied: totalReplied,\n    open_rate: openRate + '%',\n    click_rate: clickRate + '%',\n    reply_rate: replyRate + '%'\n  },\n  domains: domainSummary,\n  alerts: []\n};\n\n// Generate alerts\nif (parseFloat(openRate) < 20) {\n  report.alerts.push('Open rate below 20% - check subject lines and deliverability');\n}\nif (parseFloat(replyRate) < 2) {\n  report.alerts.push('Reply rate below 2% - review email copy');\n}\nfor (const d of domainSummary) {\n  if (d.reputation < 70) {\n    report.alerts.push(`Domain ${d.domain} reputation at ${d.reputation} - consider pausing`);\n  }\n}\nif (bounced > totalLeads * 0.05) {\n  report.alerts.push(`Bounce rate above 5% (${bounced}/${totalLeads}) - review lead quality`);\n}\n\nreturn [{ json: report }];"
+      },
+      "id": "compile-report",
+      "name": "Compile Weekly Report",
+      "type": "n8n-nodes-base.code",
+      "position": [1100, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format report as readable message for notification\nconst r = $input.first().json;\n\nconst lines = [\n  '=== OUTBOUND WEEKLY REPORT ===',\n  `Period: ${new Date(r.period.start).toLocaleDateString('pt-BR')} - ${new Date(r.period.end).toLocaleDateString('pt-BR')}`,\n  '',\n  'PIPELINE:',\n  `  Total Leads: ${r.pipeline.total_leads}`,\n  ...Object.entries(r.pipeline.by_status).map(([k, v]) => `  ${k}: ${v}`),\n  '',\n  'EMAIL METRICS:',\n  `  Sent: ${r.email_metrics.total_sent}`,\n  `  Opened: ${r.email_metrics.total_opened} (${r.email_metrics.open_rate})`,\n  `  Clicked: ${r.email_metrics.total_clicked} (${r.email_metrics.click_rate})`,\n  `  Replied: ${r.email_metrics.total_replied} (${r.email_metrics.reply_rate})`,\n  '',\n  'DOMAINS:',\n  ...r.domains.map(d => `  ${d.domain}: ${d.sent_today}/${d.daily_limit} (rep: ${d.reputation})`),\n];\n\nif (r.alerts.length > 0) {\n  lines.push('', 'ALERTS:');\n  r.alerts.forEach(a => lines.push(`  * ${a}`));\n}\n\nreturn [{\n  json: {\n    ...r,\n    formatted_text: lines.join('\\n')\n  }\n}];"
+      },
+      "id": "format-report",
+      "name": "Format Report",
+      "type": "n8n-nodes-base.code",
+      "position": [1350, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "CONFIGURE_NOTIFICATION_WEBHOOK_URL",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"{{ $json.formatted_text }}\"\n}"
+      },
+      "id": "send-notification",
+      "name": "Send Weekly Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1600, 300],
+      "typeVersion": 4.2,
+      "continueOnFail": true,
+      "notes": "CONFIGURE: Set Slack/email/custom webhook URL for weekly report delivery"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "response",
+      "name": "Response (JSON Report)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1600, 500],
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Weekly Monday 8AM BRT": { "main": [[{ "node": "Set Report Period", "type": "main", "index": 0 }]] },
+    "Manual Report Trigger": { "main": [[{ "node": "Set Report Period", "type": "main", "index": 0 }]] },
+    "Set Report Period": { "main": [[{ "node": "Fetch Pipeline View", "type": "main", "index": 0 }, { "node": "Fetch Cadence Performance", "type": "main", "index": 0 }, { "node": "Fetch Domain Health", "type": "main", "index": 0 }]] },
+    "Fetch Pipeline View": { "main": [[{ "node": "Compile Weekly Report", "type": "main", "index": 0 }]] },
+    "Fetch Cadence Performance": { "main": [[{ "node": "Compile Weekly Report", "type": "main", "index": 0 }]] },
+    "Fetch Domain Health": { "main": [[{ "node": "Compile Weekly Report", "type": "main", "index": 0 }]] },
+    "Compile Weekly Report": { "main": [[{ "node": "Format Report", "type": "main", "index": 0 }]] },
+    "Format Report": { "main": [[{ "node": "Send Weekly Report", "type": "main", "index": 0 }, { "node": "Response (JSON Report)", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "outbound" }, { "name": "leveron" }, { "name": "ob-lev-10" }]
+}

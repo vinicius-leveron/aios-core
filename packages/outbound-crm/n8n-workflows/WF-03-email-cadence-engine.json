@@ -1,0 +1,237 @@
+{
+  "name": "WF-03 Email Cadence Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 9 * * 1-5" }]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 9AM BRT (Weekdays)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "typeVersion": 1.2,
+      "notes": "Runs Mon-Fri at 9:00 AM BRT (12:00 UTC)"
+    },
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [250, 500],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if today is a weekday (safety check beyond cron)\nconst now = new Date();\nconst day = now.getDay(); // 0=Sun, 6=Sat\n\nif (day === 0 || day === 6) {\n  console.log('Weekend - skipping cadence run');\n  return [];\n}\n\nreturn [{ json: { run_date: now.toISOString(), day_of_week: day } }];"
+      },
+      "id": "weekend-check",
+      "name": "Weekend Check",
+      "type": "n8n-nodes-base.code",
+      "position": [500, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "schema": "public",
+        "table": "leads",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            { "keyName": "status", "condition": "eq", "keyValue": "in_cadence" },
+            { "keyName": "cadence_paused", "condition": "eq", "keyValue": "false" }
+          ]
+        }
+      },
+      "id": "fetch-leads",
+      "name": "Fetch Active Leads",
+      "type": "n8n-nodes-base.supabase",
+      "position": [750, 400],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate which leads need an email today\nconst leads = $input.all().map(i => i.json);\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\n\nconst readyToSend = [];\n\nfor (const lead of leads) {\n  if (!lead.cadence_started_at) continue;\n  \n  const startDate = new Date(lead.cadence_started_at);\n  startDate.setHours(0, 0, 0, 0);\n  const daysSinceStart = Math.floor((today - startDate) / (1000 * 60 * 60 * 24));\n  \n  // Get cadence steps (from cadences table via join or stored in lead)\n  // Step delays: [0, 3, 7, 12]\n  const stepDelays = [0, 3, 7, 12];\n  const currentStep = lead.cadence_step || 0;\n  \n  if (currentStep >= stepDelays.length) {\n    continue; // All steps completed\n  }\n  \n  const targetDay = stepDelays[currentStep];\n  \n  if (daysSinceStart >= targetDay) {\n    readyToSend.push({\n      ...lead,\n      _current_step: currentStep,\n      _days_since_start: daysSinceStart,\n      _target_day: targetDay\n    });\n  }\n}\n\nconsole.log(`Cadence Engine: ${leads.length} active leads, ${readyToSend.length} ready to send`);\n\nreturn readyToSend.map(lead => ({ json: lead }));"
+      },
+      "id": "calculate-schedule",
+      "name": "Calculate Send Schedule",
+      "type": "n8n-nodes-base.code",
+      "position": [1000, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "schema": "public",
+        "table": "email_domains",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            { "keyName": "active", "condition": "eq", "keyValue": "true" }
+          ]
+        }
+      },
+      "id": "fetch-domains",
+      "name": "Fetch Active Domains",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1000, 600],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "schema": "public",
+        "table": "message_templates",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            { "keyName": "active", "condition": "eq", "keyValue": "true" }
+          ]
+        }
+      },
+      "id": "fetch-templates",
+      "name": "Fetch Templates",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1000, 200],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// For each lead:\n// 1. Find the correct template for their cadence step\n// 2. Replace variables\n// 3. Select a domain (round-robin)\n// 4. Build the email payload\n\nconst leads = $('Calculate Send Schedule').all().map(i => i.json);\nconst domains = $('Fetch Active Domains').all().map(i => i.json)\n  .filter(d => d.sent_today < d.daily_limit);\nconst templates = $('Fetch Templates').all().map(i => i.json);\n\nif (domains.length === 0) {\n  console.log('No domains available (all at daily limit)');\n  return [];\n}\n\nconst emailsToSend = [];\nlet domainIndex = 0;\n\nfor (const lead of leads) {\n  // Find template for current step\n  const template = templates.find(t => \n    t.cadence_id === lead.cadence_id && \n    t.step_number === lead._current_step &&\n    t.version === (lead.custom_fields?.variant || 'A')\n  );\n  \n  if (!template) {\n    console.log(`No template found for lead ${lead.id} step ${lead._current_step}`);\n    continue;\n  }\n  \n  // Select domain (round-robin)\n  const domain = domains[domainIndex % domains.length];\n  domainIndex++;\n  \n  // Check domain limit\n  if (domain.sent_today >= domain.daily_limit) continue;\n  \n  // Replace template variables\n  let subject = template.subject || '';\n  let body = template.body || '';\n  \n  const vars = {\n    first_name: lead.first_name || '',\n    last_name: lead.last_name || '',\n    company_name: lead.company_name || '',\n    role: lead.role || '',\n    industry: lead.industry || ''\n  };\n  \n  for (const [key, value] of Object.entries(vars)) {\n    subject = subject.replace(new RegExp(`\\\\{\\\\{${key}\\\\}\\\\}`, 'g'), value);\n    body = body.replace(new RegExp(`\\\\{\\\\{${key}\\\\}\\\\}`, 'g'), value);\n  }\n  \n  // Build thread headers for follow-up emails (step > 0)\n  const threadHeaders = {};\n  if (lead._current_step > 0 && lead.custom_fields?.first_message_id) {\n    threadHeaders['In-Reply-To'] = lead.custom_fields.first_message_id;\n    threadHeaders['References'] = lead.custom_fields.first_message_id;\n  }\n  \n  emailsToSend.push({\n    lead_id: lead.id,\n    lead_email: lead.email,\n    lead_name: `${lead.first_name} ${lead.last_name || ''}`.trim(),\n    from_email: `leveron@${domain.domain}`,\n    from_name: 'Leveron',\n    reply_to: `respostas@${domain.domain}`,\n    subject: subject,\n    body_text: body,\n    body_html: body.replace(/\\n/g, '<br>'),\n    domain_id: domain.id,\n    domain_name: domain.domain,\n    template_id: template.id,\n    cadence_step: lead._current_step,\n    thread_headers: threadHeaders,\n    list_unsubscribe: `<mailto:unsubscribe@${domain.domain}?subject=unsubscribe>`,\n    _domain_sent_today: domain.sent_today\n  });\n  \n  // Increment local counter\n  domain.sent_today++;\n}\n\nconsole.log(`Prepared ${emailsToSend.length} emails to send`);\nreturn emailsToSend.map(e => ({ json: e }));"
+      },
+      "id": "prepare-emails",
+      "name": "Prepare Emails",
+      "type": "n8n-nodes-base.code",
+      "position": [1300, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"from\": \"{{ $json.from_name }} <{{ $json.from_email }}>\",\n  \"to\": [\"{{ $json.lead_email }}\"],\n  \"reply_to\": \"{{ $json.reply_to }}\",\n  \"subject\": \"{{ $json.subject }}\",\n  \"html\": \"{{ $json.body_html }}\",\n  \"text\": \"{{ $json.body_text }}\",\n  \"headers\": {\n    \"List-Unsubscribe\": \"{{ $json.list_unsubscribe }}\"\n  }\n}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "send-email-resend",
+      "name": "Send via Resend API",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1600, 400],
+      "typeVersion": 4.2,
+      "continueOnFail": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_RESEND_CREDENTIAL_ID",
+          "name": "Resend API Key"
+        }
+      },
+      "notes": "CONFIGURE: Set Resend API key in credentials (Authorization: Bearer re_xxxxx)"
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * 3) + 2 }}",
+        "unit": "seconds"
+      },
+      "id": "human-delay",
+      "name": "Human-like Delay (2-5s)",
+      "type": "n8n-nodes-base.wait",
+      "position": [1850, 400],
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Post-send: update lead and create interaction\nconst email = $('Prepare Emails').first().json;\nconst sendResult = $('Send via Resend API').first().json;\n\nconst messageId = sendResult.id || `msg_${Date.now()}`;\nconst success = !sendResult.error;\n\nreturn [{\n  json: {\n    // Lead update\n    lead_id: email.lead_id,\n    update: {\n      emails_sent: '{{ leads.emails_sent + 1 }}',\n      last_contacted_at: new Date().toISOString(),\n      cadence_step: email.cadence_step + 1,\n      custom_fields: {\n        last_message_id: messageId,\n        first_message_id: email.cadence_step === 0 ? messageId : undefined\n      }\n    },\n    // Interaction record\n    interaction: {\n      lead_id: email.lead_id,\n      type: 'email_sent',\n      channel: 'email',\n      metadata: {\n        template_id: email.template_id,\n        domain: email.domain_name,\n        subject: email.subject,\n        message_id: messageId,\n        step_number: email.cadence_step,\n        resend_id: sendResult.id,\n        success: success\n      }\n    },\n    // Domain update\n    domain_id: email.domain_id,\n    success: success\n  }\n}];"
+      },
+      "id": "post-send-update",
+      "name": "Post-Send Updates",
+      "type": "n8n-nodes-base.code",
+      "position": [2100, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "leads",
+        "filters": {
+          "conditions": [{ "keyName": "id", "condition": "eq", "keyValue": "={{ $json.lead_id }}" }]
+        },
+        "columns": "emails_sent,last_contacted_at,cadence_step,custom_fields"
+      },
+      "id": "update-lead",
+      "name": "Update Lead",
+      "type": "n8n-nodes-base.supabase",
+      "position": [2350, 300],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "interactions",
+        "columns": "lead_id,type,channel,metadata"
+      },
+      "id": "insert-interaction",
+      "name": "Log Interaction",
+      "type": "n8n-nodes-base.supabase",
+      "position": [2350, 500],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 9AM BRT (Weekdays)": { "main": [[{ "node": "Weekend Check", "type": "main", "index": 0 }]] },
+    "Manual Trigger": { "main": [[{ "node": "Weekend Check", "type": "main", "index": 0 }]] },
+    "Weekend Check": { "main": [[{ "node": "Fetch Active Leads", "type": "main", "index": 0 }]] },
+    "Fetch Active Leads": { "main": [[{ "node": "Calculate Send Schedule", "type": "main", "index": 0 }]] },
+    "Calculate Send Schedule": { "main": [[{ "node": "Prepare Emails", "type": "main", "index": 0 }]] },
+    "Fetch Active Domains": { "main": [[{ "node": "Prepare Emails", "type": "main", "index": 0 }]] },
+    "Fetch Templates": { "main": [[{ "node": "Prepare Emails", "type": "main", "index": 0 }]] },
+    "Prepare Emails": { "main": [[{ "node": "Send via Resend API", "type": "main", "index": 0 }]] },
+    "Send via Resend API": { "main": [[{ "node": "Human-like Delay (2-5s)", "type": "main", "index": 0 }]] },
+    "Human-like Delay (2-5s)": { "main": [[{ "node": "Post-Send Updates", "type": "main", "index": 0 }]] },
+    "Post-Send Updates": { "main": [[{ "node": "Update Lead", "type": "main", "index": 0 }, { "node": "Log Interaction", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "outbound" }, { "name": "leveron" }, { "name": "ob-lev-5" }]
+}

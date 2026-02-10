@@ -1,0 +1,172 @@
+{
+  "name": "WF-01 Lead Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-ingestion",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 */6 * * *" }]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Scheduled Trigger (every 6h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 500],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate input and determine source type\nconst input = $input.first().json;\n\nconst sourceType = input.source_type || 'manual';\nconst region = input.region || 'Sao Paulo';\nconst csvData = input.csv_data || null;\n\n// Validate required fields\nif (sourceType === 'csv' && !csvData) {\n  throw new Error('csv_data required when source_type is csv');\n}\n\nreturn [{\n  json: {\n    source_type: sourceType,\n    region: region,\n    csv_data: csvData,\n    started_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "input-validation",
+      "name": "Input Validation",
+      "type": "n8n-nodes-base.code",
+      "position": [500, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            { "outputKey": "google_maps", "conditions": { "conditions": [{ "leftValue": "={{ $json.source_type }}", "rightValue": "google_maps", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "oab", "conditions": { "conditions": [{ "leftValue": "={{ $json.source_type }}", "rightValue": "oab", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "csv", "conditions": { "conditions": [{ "leftValue": "={{ $json.source_type }}", "rightValue": "csv", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "all", "conditions": { "conditions": [{ "leftValue": "={{ $json.source_type }}", "rightValue": "all", "operator": { "type": "string", "operation": "equals" } }] } }
+          ]
+        }
+      },
+      "id": "route-source",
+      "name": "Route by Source",
+      "type": "n8n-nodes-base.switch",
+      "position": [700, 400],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "jsCode": "// Google Maps scraping via HTTP request\n// Searches for 'escritorio de advocacia em [region]'\nconst region = $input.first().json.region;\n\n// NOTE: Replace with actual Google Maps Places API or scraping approach\n// This is a template - actual implementation depends on:\n// Option A: Google Places API (requires API key, $0.032/request)\n// Option B: SerpAPI Google Maps ($50/mo, 5000 searches)\n// Option C: Browser MCP scraping (free but slower)\n\nconst searchQuery = `escritorio de advocacia em ${region}`;\n\nreturn [{\n  json: {\n    search_query: searchQuery,\n    region: region,\n    source: 'google_maps',\n    note: 'CONFIGURE: Replace with actual Google Maps API call or SerpAPI integration'\n  }\n}];"
+      },
+      "id": "google-maps-scraper",
+      "name": "Google Maps Scraper",
+      "type": "n8n-nodes-base.code",
+      "position": [950, 200],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// OAB Directory scraping\n// Targets: OAB-SP, OAB-RJ, OAB-MG\nconst region = $input.first().json.region;\n\n// NOTE: Replace with actual OAB scraping\n// OAB sites are state-level: www.oabsp.org.br, www.oabrj.org.br, etc.\n// Use Browser MCP or HTTP requests to scrape firm listings\n\nreturn [{\n  json: {\n    source: 'oab_directory',\n    region: region,\n    note: 'CONFIGURE: Replace with actual OAB directory scraping'\n  }\n}];"
+      },
+      "id": "oab-scraper",
+      "name": "OAB Directory Scraper",
+      "type": "n8n-nodes-base.code",
+      "position": [950, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// CSV import - parse uploaded CSV data\nconst csvData = $input.first().json.csv_data;\n\nif (!csvData || !Array.isArray(csvData)) {\n  throw new Error('csv_data must be an array of lead objects');\n}\n\n// Map CSV fields to lead schema\nconst leads = csvData.map(row => ({\n  first_name: row.first_name || row.nome || '',\n  last_name: row.last_name || row.sobrenome || '',\n  email: row.email || '',\n  phone: row.phone || row.telefone || '',\n  company_name: row.company_name || row.empresa || row.escritorio || '',\n  company_website: row.website || row.site || '',\n  role: row.role || row.cargo || '',\n  industry: row.industry || 'juridico',\n  source: 'csv_import',\n  linkedin_url: row.linkedin || '',\n  notes: row.notes || row.observacoes || ''\n})).filter(lead => lead.first_name && (lead.email || lead.phone || lead.company_name));\n\nreturn leads.map(lead => ({ json: lead }));"
+      },
+      "id": "csv-parser",
+      "name": "CSV Parser",
+      "type": "n8n-nodes-base.code",
+      "position": [950, 600],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deduplication logic\n// Match by normalized company_name + city\nconst leads = $input.all().map(item => item.json);\n\nconst normalize = (str) => (str || '').toLowerCase().trim()\n  .replace(/escritorio de advocacia /g, '')\n  .replace(/advogados associados/g, '')\n  .replace(/\\s+/g, ' ');\n\nconst seen = new Map();\nconst deduped = [];\nlet duplicatesRemoved = 0;\n\nfor (const lead of leads) {\n  const key = normalize(lead.company_name);\n  \n  if (seen.has(key)) {\n    // Merge: prefer record with more filled fields\n    const existing = seen.get(key);\n    const existingFields = Object.values(existing).filter(v => v).length;\n    const newFields = Object.values(lead).filter(v => v).length;\n    \n    if (newFields > existingFields) {\n      // New record has more data - replace\n      const idx = deduped.findIndex(l => normalize(l.company_name) === key);\n      if (idx >= 0) deduped[idx] = { ...existing, ...lead };\n    } else {\n      // Merge new data into existing\n      const idx = deduped.findIndex(l => normalize(l.company_name) === key);\n      if (idx >= 0) {\n        for (const [k, v] of Object.entries(lead)) {\n          if (v && !deduped[idx][k]) deduped[idx][k] = v;\n        }\n      }\n    }\n    duplicatesRemoved++;\n  } else {\n    seen.set(key, lead);\n    deduped.push(lead);\n  }\n}\n\n// Add metadata\nconst results = deduped.map(lead => ({\n  json: {\n    ...lead,\n    _dedup_key: normalize(lead.company_name),\n    _is_complete: !!(lead.company_name && (lead.email || lead.phone || lead.company_website))\n  }\n}));\n\n// Log summary\nconsole.log(`Dedup: ${leads.length} input -> ${deduped.length} unique (${duplicatesRemoved} removed)`);\n\nreturn results;"
+      },
+      "id": "deduplication",
+      "name": "Deduplication",
+      "type": "n8n-nodes-base.code",
+      "position": [1200, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate lead data and set status\nconst lead = $input.first().json;\n\nconst isComplete = lead.company_name && \n  (lead.email || lead.phone || lead.company_website);\n\nreturn [{\n  json: {\n    first_name: lead.first_name || 'Unknown',\n    last_name: lead.last_name || null,\n    email: lead.email || null,\n    email_validated: false,\n    phone: lead.phone || null,\n    whatsapp: lead.whatsapp || null,\n    linkedin_url: lead.linkedin_url || null,\n    instagram_handle: lead.instagram_handle || null,\n    company_name: lead.company_name || null,\n    company_website: lead.company_website || null,\n    company_size: lead.company_size || null,\n    industry: lead.industry || 'juridico',\n    role: lead.role || null,\n    source: lead.source || 'manual',\n    status: isComplete ? 'new' : 'incomplete',\n    notes: lead.notes || null,\n    tags: lead.tags || [],\n    custom_fields: {\n      scraped_at: new Date().toISOString(),\n      original_source: lead.source,\n      ...(lead.custom_fields || {})\n    }\n  }\n}];"
+      },
+      "id": "data-validation",
+      "name": "Data Validation & Mapping",
+      "type": "n8n-nodes-base.code",
+      "position": [1450, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "leads",
+        "columns": "first_name,last_name,email,email_validated,phone,whatsapp,linkedin_url,instagram_handle,company_name,company_website,company_size,industry,role,source,status,notes,tags,custom_fields",
+        "options": {
+          "onConflict": "email"
+        }
+      },
+      "id": "supabase-insert",
+      "name": "Insert into Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1700, 400],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate ingestion summary\nconst items = $input.all();\nconst summary = {\n  total_processed: items.length,\n  successful: items.filter(i => !i.json.error).length,\n  failed: items.filter(i => i.json.error).length,\n  completed_at: new Date().toISOString()\n};\n\nconsole.log('Lead Ingestion Summary:', JSON.stringify(summary));\n\nreturn [{ json: summary }];"
+      },
+      "id": "summary-log",
+      "name": "Ingestion Summary",
+      "type": "n8n-nodes-base.code",
+      "position": [1950, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [2200, 400],
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Input Validation", "type": "main", "index": 0 }]] },
+    "Scheduled Trigger (every 6h)": { "main": [[{ "node": "Input Validation", "type": "main", "index": 0 }]] },
+    "Input Validation": { "main": [[{ "node": "Route by Source", "type": "main", "index": 0 }]] },
+    "Route by Source": {
+      "main": [
+        [{ "node": "Google Maps Scraper", "type": "main", "index": 0 }],
+        [{ "node": "OAB Directory Scraper", "type": "main", "index": 0 }],
+        [{ "node": "CSV Parser", "type": "main", "index": 0 }],
+        [{ "node": "Google Maps Scraper", "type": "main", "index": 0 }, { "node": "OAB Directory Scraper", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Maps Scraper": { "main": [[{ "node": "Deduplication", "type": "main", "index": 0 }]] },
+    "OAB Directory Scraper": { "main": [[{ "node": "Deduplication", "type": "main", "index": 0 }]] },
+    "CSV Parser": { "main": [[{ "node": "Deduplication", "type": "main", "index": 0 }]] },
+    "Deduplication": { "main": [[{ "node": "Data Validation & Mapping", "type": "main", "index": 0 }]] },
+    "Data Validation & Mapping": { "main": [[{ "node": "Insert into Supabase", "type": "main", "index": 0 }]] },
+    "Insert into Supabase": { "main": [[{ "node": "Ingestion Summary", "type": "main", "index": 0 }]] },
+    "Ingestion Summary": { "main": [[{ "node": "Webhook Response", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "outbound" }, { "name": "leveron" }, { "name": "ob-lev-2" }]
+}

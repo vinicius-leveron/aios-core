@@ -1,0 +1,148 @@
+{
+  "name": "WF-02 Email Enrichment",
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "conditions": [
+            { "leftValue": "={{ $json.type }}", "rightValue": "INSERT", "operator": { "type": "string", "operation": "equals" } },
+            { "leftValue": "={{ $json.record.status }}", "rightValue": "new", "operator": { "type": "string", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "supabase-trigger",
+      "name": "New Lead Trigger (Supabase Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "typeVersion": 2,
+      "notes": "Configure Supabase webhook to POST here on leads INSERT"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "enrich-leads",
+        "responseMode": "responseNode"
+      },
+      "id": "manual-trigger",
+      "name": "Manual Batch Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 500],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if lead already has validated email - skip if so\nconst lead = $input.first().json.record || $input.first().json;\n\nif (lead.email_validated) {\n  return []; // Skip - already enriched\n}\n\nreturn [{ json: lead }];"
+      },
+      "id": "skip-enriched",
+      "name": "Skip Already Enriched",
+      "type": "n8n-nodes-base.code",
+      "position": [500, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract domain from company website for email pattern generation\nconst lead = $input.first().json;\nlet domain = null;\n\nif (lead.company_website) {\n  try {\n    const url = lead.company_website.startsWith('http') \n      ? lead.company_website \n      : `https://${lead.company_website}`;\n    domain = new URL(url).hostname.replace('www.', '');\n  } catch (e) {\n    domain = lead.company_website.replace(/^(https?:\\/\\/)?(www\\.)?/, '').split('/')[0];\n  }\n}\n\n// Generate email patterns for Brazilian law firms\nconst patterns = [];\nconst firstName = (lead.first_name || '').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');\nconst lastName = (lead.last_name || '').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');\n\nif (domain && firstName) {\n  // Common patterns for Brazilian law firms\n  patterns.push(`${firstName}@${domain}`);\n  if (lastName) {\n    patterns.push(`${firstName}.${lastName}@${domain}`);\n    patterns.push(`${firstName}${lastName.charAt(0)}@${domain}`);\n    patterns.push(`${firstName.charAt(0)}${lastName}@${domain}`);\n  }\n  // Generic patterns\n  patterns.push(`contato@${domain}`);\n  patterns.push(`juridico@${domain}`);\n  patterns.push(`escritorio@${domain}`);\n}\n\nreturn [{\n  json: {\n    ...lead,\n    _domain: domain,\n    _email_patterns: patterns,\n    _enrichment_started: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "extract-domain",
+      "name": "Extract Domain & Generate Patterns",
+      "type": "n8n-nodes-base.code",
+      "position": [750, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.hunter.io/v2/domain-search?domain={{ $json._domain }}&api_key=CONFIGURE_HUNTER_API_KEY&limit=5",
+        "options": { "timeout": 10000 }
+      },
+      "id": "hunter-api",
+      "name": "Hunter.io Email Finder",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1000, 300],
+      "typeVersion": 4.2,
+      "continueOnFail": true,
+      "notes": "CONFIGURE: Replace CONFIGURE_HUNTER_API_KEY with actual API key"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process Hunter.io results and determine best email\nconst lead = $('Extract Domain & Generate Patterns').first().json;\nconst hunterResult = $input.first().json;\n\nlet foundEmail = null;\nlet emailSource = null;\n\n// Check Hunter.io results\nif (hunterResult.data && hunterResult.data.emails && hunterResult.data.emails.length > 0) {\n  // Try to find personal email matching the lead's name\n  const firstName = (lead.first_name || '').toLowerCase();\n  const personalEmail = hunterResult.data.emails.find(e => \n    e.first_name && e.first_name.toLowerCase() === firstName\n  );\n  \n  if (personalEmail) {\n    foundEmail = personalEmail.value;\n    emailSource = 'hunter_api_personal';\n  } else {\n    // Use first generic email\n    foundEmail = hunterResult.data.emails[0].value;\n    emailSource = 'hunter_api_generic';\n  }\n} else if (lead._email_patterns && lead._email_patterns.length > 0) {\n  // Fallback to pattern-generated email (first personal pattern)\n  foundEmail = lead._email_patterns[0];\n  emailSource = 'pattern_generated';\n}\n\nreturn [{\n  json: {\n    ...lead,\n    _found_email: foundEmail,\n    _email_source: emailSource\n  }\n}];"
+      },
+      "id": "process-hunter",
+      "name": "Process Email Results",
+      "type": "n8n-nodes-base.code",
+      "position": [1250, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://emailvalidation.abstractapi.com/v1/?api_key=CONFIGURE_VALIDATION_API_KEY&email={{ $json._found_email }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "email-validation",
+      "name": "Email Validation API",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1500, 300],
+      "typeVersion": 4.2,
+      "continueOnFail": true,
+      "notes": "CONFIGURE: Replace with NeverBounce, ZeroBounce, or AbstractAPI key. Alternative endpoints:\n- NeverBounce: https://api.neverbounce.com/v4/single/check\n- ZeroBounce: https://api.zerobounce.net/v2/validate"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process validation result and determine if email is usable\nconst lead = $('Process Email Results').first().json;\nconst validation = $input.first().json;\n\nlet emailValidated = false;\nlet validationStatus = 'unknown';\n\n// Parse validation result (adapt based on chosen API)\nif (validation) {\n  // AbstractAPI format\n  if (validation.deliverability === 'DELIVERABLE') {\n    emailValidated = true;\n    validationStatus = 'valid';\n  } else if (validation.is_catchall_email) {\n    emailValidated = true; // Accept catch-all with flag\n    validationStatus = 'catch_all';\n  } else if (validation.deliverability === 'UNDELIVERABLE') {\n    emailValidated = false;\n    validationStatus = 'invalid';\n  }\n  // NeverBounce format\n  else if (validation.result === 'valid') {\n    emailValidated = true;\n    validationStatus = 'valid';\n  } else if (validation.result === 'catchall') {\n    emailValidated = true;\n    validationStatus = 'catch_all';\n  } else if (validation.result === 'invalid' || validation.result === 'disposable') {\n    emailValidated = false;\n    validationStatus = validation.result;\n  }\n}\n\n// Determine final status\nconst newStatus = emailValidated ? 'enriched' : \n  (lead._found_email ? 'unqualified' : 'unqualified');\n\nreturn [{\n  json: {\n    lead_id: lead.id,\n    email: emailValidated ? lead._found_email : lead.email,\n    email_validated: emailValidated,\n    status: newStatus,\n    custom_fields: {\n      ...(lead.custom_fields || {}),\n      email_source: lead._email_source,\n      email_validation_status: validationStatus,\n      enriched_at: new Date().toISOString(),\n      domain: lead._domain\n    }\n  }\n}];"
+      },
+      "id": "process-validation",
+      "name": "Process Validation Result",
+      "type": "n8n-nodes-base.code",
+      "position": [1750, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "leads",
+        "filters": {
+          "conditions": [{ "keyName": "id", "condition": "eq", "keyValue": "={{ $json.lead_id }}" }]
+        },
+        "columns": "email,email_validated,status,custom_fields"
+      },
+      "id": "supabase-update",
+      "name": "Update Lead in Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "position": [2000, 300],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log enrichment summary\nconst items = $input.all();\nconst summary = {\n  total_processed: items.length,\n  emails_found: items.filter(i => i.json.email).length,\n  emails_validated: items.filter(i => i.json.email_validated).length,\n  enriched: items.filter(i => i.json.status === 'enriched').length,\n  unqualified: items.filter(i => i.json.status === 'unqualified').length,\n  completed_at: new Date().toISOString()\n};\n\nreturn [{ json: summary }];"
+      },
+      "id": "enrichment-summary",
+      "name": "Enrichment Summary",
+      "type": "n8n-nodes-base.code",
+      "position": [2250, 300],
+      "typeVersion": 2
+    }
+  ],
+  "connections": {
+    "New Lead Trigger (Supabase Webhook)": { "main": [[{ "node": "Skip Already Enriched", "type": "main", "index": 0 }]] },
+    "Manual Batch Trigger": { "main": [[{ "node": "Skip Already Enriched", "type": "main", "index": 0 }]] },
+    "Skip Already Enriched": { "main": [[{ "node": "Extract Domain & Generate Patterns", "type": "main", "index": 0 }]] },
+    "Extract Domain & Generate Patterns": { "main": [[{ "node": "Hunter.io Email Finder", "type": "main", "index": 0 }]] },
+    "Hunter.io Email Finder": { "main": [[{ "node": "Process Email Results", "type": "main", "index": 0 }]] },
+    "Process Email Results": { "main": [[{ "node": "Email Validation API", "type": "main", "index": 0 }]] },
+    "Email Validation API": { "main": [[{ "node": "Process Validation Result", "type": "main", "index": 0 }]] },
+    "Process Validation Result": { "main": [[{ "node": "Update Lead in Supabase", "type": "main", "index": 0 }]] },
+    "Update Lead in Supabase": { "main": [[{ "node": "Enrichment Summary", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "outbound" }, { "name": "leveron" }, { "name": "ob-lev-3" }]
+}
