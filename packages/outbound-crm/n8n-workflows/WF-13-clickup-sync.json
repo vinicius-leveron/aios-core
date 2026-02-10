@@ -1,0 +1,206 @@
+{
+  "name": "WF-13 CRM → ClickUp Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "=CONFIGURE_SUPABASE_URL/rest/v1/leads?or=(status.eq.replied,status.eq.meeting,status.eq.proposal,status.eq.won)&updated_at=gte.{{ new Date(Date.now() - 5 * 60 * 1000).toISOString() }}&select=id,first_name,last_name,email,company_name,role,lead_score,status,cadence_step,emails_sent,emails_opened,emails_replied,last_replied_at,updated_at",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-updated-leads",
+      "name": "Fetch Recently Updated Leads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "has-results",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-results",
+      "name": "Any Updated Leads?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "={{ $json }}",
+        "options": {}
+      },
+      "id": "split-leads",
+      "name": "Split Into Items",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "is-replied",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "replied",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "route-status",
+      "name": "Route by Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1120, 200],
+      "notes": "replied → Follow-up list, meeting → Meeting list, proposal → Proposal list, won → Won list"
+    },
+    {
+      "parameters": {
+        "url": "https://api.clickup.com/api/v2/list/CONFIGURE_CLICKUP_FOLLOWUP_LIST_ID/task",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "CONFIGURE_CLICKUP_API_KEY" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": \"Follow-up: {{ $json.first_name }} {{ $json.last_name }} ({{ $json.company_name || 'N/A' }})\",\n  \"description\": \"## Lead Info\\n- **Nome:** {{ $json.first_name }} {{ $json.last_name }}\\n- **Email:** {{ $json.email }}\\n- **Empresa:** {{ $json.company_name || 'N/A' }}\\n- **Cargo:** {{ $json.role || 'N/A' }}\\n- **Score:** {{ $json.lead_score }}\\n- **Emails enviados:** {{ $json.emails_sent }}\\n- **Emails abertos:** {{ $json.emails_opened }}\\n- **Replies:** {{ $json.emails_replied }}\\n\\n## Acao\\nResponder ao lead e agendar meeting.\\n\\n---\\n*Criado automaticamente pelo CRM*\",\n  \"status\": \"to do\",\n  \"priority\": {{ $json.lead_score >= 70 ? 1 : $json.lead_score >= 50 ? 2 : 3 }},\n  \"due_date\": {{ Date.now() + 24 * 60 * 60 * 1000 }},\n  \"tags\": [\"outbound\", \"follow-up\", \"auto-created\"],\n  \"custom_fields\": [\n    {\n      \"id\": \"CONFIGURE_CF_LEAD_SCORE_ID\",\n      \"value\": {{ $json.lead_score }}\n    },\n    {\n      \"id\": \"CONFIGURE_CF_LEAD_EMAIL_ID\",\n      \"value\": \"{{ $json.email }}\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "create-followup-task",
+      "name": "Create Follow-up Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1360, 100]
+    },
+    {
+      "parameters": {
+        "url": "https://api.clickup.com/api/v2/list/CONFIGURE_CLICKUP_MEETINGS_LIST_ID/task",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "CONFIGURE_CLICKUP_API_KEY" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": \"Meeting: {{ $json.first_name }} {{ $json.last_name }} ({{ $json.company_name || 'N/A' }})\",\n  \"description\": \"## Lead Info\\n- **Nome:** {{ $json.first_name }} {{ $json.last_name }}\\n- **Email:** {{ $json.email }}\\n- **Empresa:** {{ $json.company_name || 'N/A' }}\\n- **Cargo:** {{ $json.role || 'N/A' }}\\n- **Score:** {{ $json.lead_score }}\\n\\n## Prep\\n- [ ] Pesquisar escritorio\\n- [ ] Preparar deck\\n- [ ] Definir proposta de valor\\n\\n---\\n*Criado automaticamente pelo CRM*\",\n  \"status\": \"to do\",\n  \"priority\": 1,\n  \"due_date\": {{ Date.now() + 48 * 60 * 60 * 1000 }},\n  \"tags\": [\"outbound\", \"meeting\", \"auto-created\"]\n}",
+        "options": {}
+      },
+      "id": "create-meeting-task",
+      "name": "Create Meeting Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1360, 250]
+    },
+    {
+      "parameters": {
+        "url": "https://api.clickup.com/api/v2/list/CONFIGURE_CLICKUP_PROPOSALS_LIST_ID/task",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "CONFIGURE_CLICKUP_API_KEY" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": \"Proposta: {{ $json.first_name }} {{ $json.last_name }} ({{ $json.company_name || 'N/A' }})\",\n  \"description\": \"## Lead Info\\n- **Nome:** {{ $json.first_name }} {{ $json.last_name }}\\n- **Email:** {{ $json.email }}\\n- **Empresa:** {{ $json.company_name || 'N/A' }}\\n- **Score:** {{ $json.lead_score }}\\n\\n## Proposta\\n- [ ] Definir escopo\\n- [ ] Definir pricing\\n- [ ] Enviar proposta\\n- [ ] Follow-up 48h\\n\\n---\\n*Criado automaticamente pelo CRM*\",\n  \"status\": \"to do\",\n  \"priority\": 1,\n  \"due_date\": {{ Date.now() + 24 * 60 * 60 * 1000 }},\n  \"tags\": [\"outbound\", \"proposal\", \"auto-created\"]\n}",
+        "options": {}
+      },
+      "id": "create-proposal-task",
+      "name": "Create Proposal Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1360, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://api.clickup.com/api/v2/list/CONFIGURE_CLICKUP_WON_LIST_ID/task",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "CONFIGURE_CLICKUP_API_KEY" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": \"FECHOU: {{ $json.first_name }} {{ $json.last_name }} ({{ $json.company_name || 'N/A' }})\",\n  \"description\": \"## Cliente Ganho!\\n- **Nome:** {{ $json.first_name }} {{ $json.last_name }}\\n- **Email:** {{ $json.email }}\\n- **Empresa:** {{ $json.company_name || 'N/A' }}\\n- **Score final:** {{ $json.lead_score }}\\n\\n## Onboarding\\n- [ ] Enviar contrato\\n- [ ] Agendar kickoff\\n- [ ] Configurar acesso\\n\\n---\\n*Criado automaticamente pelo CRM*\",\n  \"status\": \"to do\",\n  \"priority\": 1,\n  \"tags\": [\"outbound\", \"won\", \"auto-created\", \"onboarding\"]\n}",
+        "options": {}
+      },
+      "id": "create-won-task",
+      "name": "Create Won/Onboarding Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1360, 550]
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": { "main": [[{ "node": "Fetch Recently Updated Leads", "type": "main", "index": 0 }]] },
+    "Fetch Recently Updated Leads": { "main": [[{ "node": "Any Updated Leads?", "type": "main", "index": 0 }]] },
+    "Any Updated Leads?": {
+      "main": [
+        [{ "node": "Split Into Items", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Split Into Items": { "main": [[{ "node": "Route by Status", "type": "main", "index": 0 }]] },
+    "Route by Status": {
+      "main": [
+        [{ "node": "Create Follow-up Task", "type": "main", "index": 0 }],
+        [{ "node": "Create Meeting Task", "type": "main", "index": 0 }],
+        [{ "node": "Create Proposal Task", "type": "main", "index": 0 }],
+        [{ "node": "Create Won/Onboarding Task", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "tags": [
+    { "name": "outbound" },
+    { "name": "clickup" },
+    { "name": "sync" }
+  ]
+}

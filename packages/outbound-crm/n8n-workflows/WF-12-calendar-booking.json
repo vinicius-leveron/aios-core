@@ -1,0 +1,156 @@
+{
+  "name": "WF-12 Auto Calendar Booking",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-replied",
+        "responseMode": "onReceived",
+        "responseData": "allEntries"
+      },
+      "id": "webhook-trigger",
+      "name": "Lead Replied Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/leads?id=eq.{{ $json.lead_id }}&select=id,first_name,last_name,email,company_name,role,lead_score,status,custom_fields",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-lead",
+      "name": "Fetch Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "check-positive",
+              "leftValue": "={{ $json.reply_sentiment }}",
+              "rightValue": "negative",
+              "operator": { "type": "string", "operation": "notEquals" }
+            },
+            {
+              "id": "check-not-opted-out",
+              "leftValue": "={{ $('Fetch Lead').item.json[0].status }}",
+              "rightValue": "unsubscribed",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-sentiment",
+      "name": "Is Positive Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.resend.com/emails",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer CONFIGURE_RESEND_API_KEY" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"from\": \"CONFIGURE_FROM_EMAIL\",\n  \"to\": [\"{{ $('Fetch Lead').item.json[0].email }}\"],\n  \"subject\": \"{{ $('Fetch Lead').item.json[0].first_name }}, vamos marcar uma conversa?\",\n  \"html\": \"<div style='font-family: Arial, sans-serif; max-width: 600px;'><p>Oi {{ $('Fetch Lead').item.json[0].first_name }},</p><p>Que bom que tem interesse! Vou adorar conversar com voce sobre como podemos ajudar {{ $('Fetch Lead').item.json[0].company_name || 'seu escritorio' }}.</p><p>Escolhe o melhor horario pra voce:</p><p style='margin: 20px 0;'><a href='CONFIGURE_CALENDAR_LINK?name={{ encodeURIComponent($('Fetch Lead').item.json[0].first_name + ' ' + ($('Fetch Lead').item.json[0].last_name || '')) }}&email={{ encodeURIComponent($('Fetch Lead').item.json[0].email) }}' style='background: #C9B298; color: #000; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;'>Agendar Conversa</a></p><p>Se preferir, me diz um horario que funciona e eu ajusto.</p><p>Abraco,<br/>CONFIGURE_SENDER_NAME</p></div>\",\n  \"headers\": {\n    \"X-Entity-Ref-ID\": \"booking-{{ $('Fetch Lead').item.json[0].id }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "send-booking-email",
+      "name": "Send Calendar Link",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [920, 200]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/leads?id=eq.{{ $('Fetch Lead').item.json[0].id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"meeting\",\n  \"custom_fields\": {{ JSON.stringify(Object.assign({}, $('Fetch Lead').item.json[0].custom_fields || {}, { booking_sent_at: new Date().toISOString(), calendar_link: 'CONFIGURE_CALENDAR_LINK' })) }}\n}",
+        "options": {}
+      },
+      "id": "update-lead-status",
+      "name": "Update Lead → Meeting",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1140, 200]
+    },
+    {
+      "parameters": {
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/interactions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"lead_id\": \"{{ $('Fetch Lead').item.json[0].id }}\",\n  \"type\": \"booking_link_sent\",\n  \"channel\": \"email\",\n  \"subject\": \"Calendar booking link sent\",\n  \"metadata\": { \"calendar_link\": \"CONFIGURE_CALENDAR_LINK\" }\n}",
+        "options": {}
+      },
+      "id": "log-interaction",
+      "name": "Log Booking Interaction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1360, 200]
+    }
+  ],
+  "connections": {
+    "Lead Replied Webhook": { "main": [[{ "node": "Fetch Lead", "type": "main", "index": 0 }]] },
+    "Fetch Lead": { "main": [[{ "node": "Is Positive Reply?", "type": "main", "index": 0 }]] },
+    "Is Positive Reply?": {
+      "main": [
+        [{ "node": "Send Calendar Link", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Send Calendar Link": { "main": [[{ "node": "Update Lead → Meeting", "type": "main", "index": 0 }]] },
+    "Update Lead → Meeting": { "main": [[{ "node": "Log Booking Interaction", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "tags": [
+    { "name": "outbound" },
+    { "name": "conversion" },
+    { "name": "tier-1" }
+  ]
+}

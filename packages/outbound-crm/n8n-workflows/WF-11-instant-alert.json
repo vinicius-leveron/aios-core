@@ -1,0 +1,148 @@
+{
+  "name": "WF-11 Instant Alert (WhatsApp/Slack)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "reply-alert",
+        "responseMode": "onReceived",
+        "responseData": "allEntries"
+      },
+      "id": "webhook-trigger",
+      "name": "Reply Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/leads?id=eq.{{ $json.lead_id }}&select=first_name,last_name,email,company_name,role,lead_score,status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-lead",
+      "name": "Fetch Lead Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-channel",
+              "leftValue": "={{ $json.alert_channel }}",
+              "rightValue": "whatsapp",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "route-channel",
+      "name": "WhatsApp or Slack?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/CONFIGURE_WHATSAPP_PHONE_ID/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer CONFIGURE_WHATSAPP_TOKEN" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"CONFIGURE_YOUR_WHATSAPP_NUMBER\",\n  \"type\": \"template\",\n  \"template\": {\n    \"name\": \"lead_reply_alert\",\n    \"language\": { \"code\": \"pt_BR\" },\n    \"components\": [\n      {\n        \"type\": \"body\",\n        \"parameters\": [\n          { \"type\": \"text\", \"text\": \"{{ $('Fetch Lead Details').item.json[0].first_name }} {{ $('Fetch Lead Details').item.json[0].last_name }}\" },\n          { \"type\": \"text\", \"text\": \"{{ $('Fetch Lead Details').item.json[0].company_name || 'N/A' }}\" },\n          { \"type\": \"text\", \"text\": \"{{ $('Fetch Lead Details').item.json[0].lead_score }}\" },\n          { \"type\": \"text\", \"text\": \"{{ $json.reply_snippet || 'Sem preview' }}\" }\n        ]\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "id": "send-whatsapp",
+      "name": "Send WhatsApp Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [920, 200]
+    },
+    {
+      "parameters": {
+        "url": "CONFIGURE_SLACK_WEBHOOK_URL",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"blocks\": [\n    {\n      \"type\": \"header\",\n      \"text\": { \"type\": \"plain_text\", \"text\": \"Lead Respondeu!\" }\n    },\n    {\n      \"type\": \"section\",\n      \"fields\": [\n        { \"type\": \"mrkdwn\", \"text\": \"*Nome:*\\n{{ $('Fetch Lead Details').item.json[0].first_name }} {{ $('Fetch Lead Details').item.json[0].last_name }}\" },\n        { \"type\": \"mrkdwn\", \"text\": \"*Empresa:*\\n{{ $('Fetch Lead Details').item.json[0].company_name || 'N/A' }}\" },\n        { \"type\": \"mrkdwn\", \"text\": \"*Score:*\\n{{ $('Fetch Lead Details').item.json[0].lead_score }}\" },\n        { \"type\": \"mrkdwn\", \"text\": \"*Cargo:*\\n{{ $('Fetch Lead Details').item.json[0].role || 'N/A' }}\" }\n      ]\n    },\n    {\n      \"type\": \"section\",\n      \"text\": { \"type\": \"mrkdwn\", \"text\": \"*Preview:*\\n> {{ $json.reply_snippet || 'Sem preview disponivel' }}\" }\n    },\n    {\n      \"type\": \"actions\",\n      \"elements\": [\n        {\n          \"type\": \"button\",\n          \"text\": { \"type\": \"plain_text\", \"text\": \"Ver no CRM\" },\n          \"url\": \"CONFIGURE_DASHBOARD_URL/outbound/leads?search={{ $('Fetch Lead Details').item.json[0].email }}\",\n          \"style\": \"primary\"\n        }\n      ]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "send-slack",
+      "name": "Send Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [920, 420]
+    },
+    {
+      "parameters": {
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/interactions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"lead_id\": \"{{ $('Reply Webhook').item.json.lead_id }}\",\n  \"type\": \"alert_sent\",\n  \"channel\": \"{{ $json.alert_channel || 'slack' }}\",\n  \"subject\": \"Instant reply alert\",\n  \"metadata\": { \"alert_type\": \"reply\", \"response_time_seconds\": {{ Date.now() - new Date($('Reply Webhook').item.json.replied_at).getTime() }} }\n}",
+        "options": {}
+      },
+      "id": "log-alert",
+      "name": "Log Alert Interaction",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1140, 300]
+    }
+  ],
+  "connections": {
+    "Reply Webhook": { "main": [[{ "node": "Fetch Lead Details", "type": "main", "index": 0 }]] },
+    "Fetch Lead Details": { "main": [[{ "node": "WhatsApp or Slack?", "type": "main", "index": 0 }]] },
+    "WhatsApp or Slack?": {
+      "main": [
+        [{ "node": "Send WhatsApp Alert", "type": "main", "index": 0 }],
+        [{ "node": "Send Slack Alert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send WhatsApp Alert": { "main": [[{ "node": "Log Alert Interaction", "type": "main", "index": 0 }]] },
+    "Send Slack Alert": { "main": [[{ "node": "Log Alert Interaction", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "tags": [
+    { "name": "outbound" },
+    { "name": "alerts" },
+    { "name": "tier-1" }
+  ]
+}
