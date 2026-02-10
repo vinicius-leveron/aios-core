@@ -1,0 +1,112 @@
+{
+  "name": "WF-06 Lead Scoring",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-scoring",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Interaction Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "typeVersion": 2,
+      "notes": "Triggered by Supabase webhook on interactions INSERT"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 23 * * 0" }]
+        }
+      },
+      "id": "decay-cron",
+      "name": "Weekly Decay (Sunday 11PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 500],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate lead score based on interactions and profile\nconst input = $input.first().json;\nconst leadId = input.record?.lead_id || input.lead_id;\n\nif (!leadId) return [];\n\n// This will be populated by the Supabase queries below\nreturn [{ json: { lead_id: leadId, mode: 'score' } }];"
+      },
+      "id": "route-score",
+      "name": "Route: Score",
+      "type": "n8n-nodes-base.code",
+      "position": [500, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Batch decay for all leads\nreturn [{ json: { mode: 'decay' } }];"
+      },
+      "id": "route-decay",
+      "name": "Route: Decay",
+      "type": "n8n-nodes-base.code",
+      "position": [500, 500],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// SCORING ENGINE\n// Fetches lead + interactions and calculates score\n// NOTE: In production, replace with actual Supabase queries\n\nconst lead = $input.first().json;\n\n// Default scoring weights (should come from ICP criteria)\nconst WEIGHTS = {\n  interaction: {\n    email_opened: 5,\n    email_clicked: 15,\n    email_replied: 30,\n    multi_open_bonus: 2,\n    multi_email_bonus: 10\n  },\n  profile: {\n    has_website: 5,\n    company_medium_plus: 10,\n    role_decisor: 15,\n    has_linkedin: 5,\n    source_linkedin: 10,\n    source_maps_oab: 5\n  },\n  hot_threshold: 50\n};\n\n// Calculate interaction score\n// (In production, count from interactions table)\nlet interactionScore = 0;\ninteractionScore += (lead.emails_opened || 0) * WEIGHTS.interaction.email_opened;\ninteractionScore += (lead.emails_clicked || 0) * WEIGHTS.interaction.email_clicked;\ninteractionScore += (lead.emails_replied || 0) * WEIGHTS.interaction.email_replied;\nif ((lead.emails_opened || 0) > 1) {\n  interactionScore += WEIGHTS.interaction.multi_email_bonus;\n}\n\n// Calculate profile score\nlet profileScore = 0;\nif (lead.company_website) profileScore += WEIGHTS.profile.has_website;\nif (['medium', 'large'].includes(lead.company_size)) profileScore += WEIGHTS.profile.company_medium_plus;\nif (lead.role && /socio|diretor|partner/i.test(lead.role)) profileScore += WEIGHTS.profile.role_decisor;\nif (lead.linkedin_url) profileScore += WEIGHTS.profile.has_linkedin;\nif (lead.source === 'linkedin') profileScore += WEIGHTS.profile.source_linkedin;\nif (['google_maps', 'oab_directory'].includes(lead.source)) profileScore += WEIGHTS.profile.source_maps_oab;\n\nconst totalScore = Math.max(0, interactionScore + profileScore);\nconst previousScore = lead.lead_score || 0;\nconst isHot = totalScore >= WEIGHTS.hot_threshold && previousScore < WEIGHTS.hot_threshold;\n\nreturn [{\n  json: {\n    lead_id: lead.id,\n    previous_score: previousScore,\n    new_score: totalScore,\n    interaction_score: interactionScore,\n    profile_score: profileScore,\n    is_hot: isHot,\n    threshold: WEIGHTS.hot_threshold\n  }\n}];"
+      },
+      "id": "scoring-engine",
+      "name": "Scoring Engine",
+      "type": "n8n-nodes-base.code",
+      "position": [800, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Apply weekly decay to all leads\n// Leads with no interaction in 14+ days lose 10% per week\n\n// NOTE: In production, query all leads and their last interaction date\n// For each lead where daysSinceLastInteraction >= 14:\n//   new_score = Math.max(0, Math.floor(current_score * 0.9))\n\nreturn [{\n  json: {\n    mode: 'decay',\n    note: 'CONFIGURE: Add Supabase query to fetch all leads, calculate decay, batch update',\n    decay_formula: 'new_score = max(0, floor(current_score * 0.9))',\n    condition: 'last interaction >= 14 days ago'\n  }\n}];"
+      },
+      "id": "decay-engine",
+      "name": "Decay Engine",
+      "type": "n8n-nodes-base.code",
+      "position": [800, 500],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [{ "value1": "={{ $json.is_hot }}", "value2": true }]
+        }
+      },
+      "id": "hot-lead-check",
+      "name": "Crossed Hot Threshold?",
+      "type": "n8n-nodes-base.if",
+      "position": [1100, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "CONFIGURE_NOTIFICATION_WEBHOOK_URL",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"HOT LEAD! Score {{ $json.new_score }} (was {{ $json.previous_score }})\\nLead ID: {{ $json.lead_id }}\\nAction: Manual outreach recommended\"\n}"
+      },
+      "id": "notify-hot-lead",
+      "name": "Notify: Hot Lead!",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1350, 200],
+      "typeVersion": 4.2,
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Interaction Webhook": { "main": [[{ "node": "Route: Score", "type": "main", "index": 0 }]] },
+    "Weekly Decay (Sunday 11PM)": { "main": [[{ "node": "Route: Decay", "type": "main", "index": 0 }]] },
+    "Route: Score": { "main": [[{ "node": "Scoring Engine", "type": "main", "index": 0 }]] },
+    "Route: Decay": { "main": [[{ "node": "Decay Engine", "type": "main", "index": 0 }]] },
+    "Scoring Engine": { "main": [[{ "node": "Crossed Hot Threshold?", "type": "main", "index": 0 }]] },
+    "Crossed Hot Threshold?": {
+      "main": [
+        [{ "node": "Notify: Hot Lead!", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "outbound" }, { "name": "leveron" }, { "name": "ob-lev-8" }]
+}

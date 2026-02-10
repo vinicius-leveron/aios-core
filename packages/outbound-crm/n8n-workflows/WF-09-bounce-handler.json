@@ -1,0 +1,152 @@
+{
+  "name": "WF-09 Bounce Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bounce-handler",
+        "responseMode": "responseNode"
+      },
+      "id": "bounce-webhook",
+      "name": "Resend Bounce Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "typeVersion": 2,
+      "notes": "CONFIGURE: Register this URL in Resend dashboard under Webhooks for bounce/complaint events"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Resend webhook event\n// Resend sends: email.bounced, email.complained, email.delivery_delayed\nconst body = $input.first().json.body;\n\nif (!body || !body.type) {\n  return [{ json: { error: 'Invalid webhook payload' } }];\n}\n\nconst eventType = body.type;\nconst data = body.data || {};\n\n// Map Resend event types\nlet bounceType = 'unknown';\nlet severity = 'soft';\n\nswitch (eventType) {\n  case 'email.bounced':\n    bounceType = 'bounce';\n    severity = 'hard';\n    break;\n  case 'email.complained':\n    bounceType = 'complaint';\n    severity = 'hard';\n    break;\n  case 'email.delivery_delayed':\n    bounceType = 'delayed';\n    severity = 'soft';\n    break;\n  default:\n    bounceType = eventType;\n}\n\nreturn [{\n  json: {\n    event_type: eventType,\n    bounce_type: bounceType,\n    severity: severity,\n    to_email: data.to?.[0] || data.email_id,\n    from_email: data.from || '',\n    resend_email_id: data.email_id || data.id,\n    reason: data.bounce?.message || data.reason || '',\n    bounce_code: data.bounce?.status_code || '',\n    timestamp: data.created_at || new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse-bounce",
+      "name": "Parse Bounce Event",
+      "type": "n8n-nodes-base.code",
+      "position": [500, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "schema": "public",
+        "table": "leads",
+        "returnAll": false,
+        "limit": 1,
+        "filters": {
+          "conditions": [{ "keyName": "email", "condition": "eq", "keyValue": "={{ $json.to_email }}" }]
+        }
+      },
+      "id": "find-lead",
+      "name": "Find Lead by Email",
+      "type": "n8n-nodes-base.supabase",
+      "position": [750, 300],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Determine action based on bounce severity\nconst bounce = $('Parse Bounce Event').first().json;\nconst lead = $input.first().json;\n\nif (!lead || !lead.id) {\n  return [{ json: { unmatched: true, email: bounce.to_email, bounce_type: bounce.bounce_type } }];\n}\n\nconst isHardBounce = bounce.severity === 'hard';\n\nreturn [{\n  json: {\n    lead_id: lead.id,\n    lead_email: lead.email,\n    lead_name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim(),\n    is_hard_bounce: isHardBounce,\n    bounce_type: bounce.bounce_type,\n    reason: bounce.reason,\n    bounce_code: bounce.bounce_code,\n    // Hard bounce: invalidate email, pause cadence, mark bounced\n    // Soft bounce: log only, retry on next cadence step\n    lead_update: isHardBounce ? {\n      status: 'bounced',\n      email_validated: false,\n      cadence_paused: true\n    } : {},\n    interaction: {\n      lead_id: lead.id,\n      type: isHardBounce ? 'email_hard_bounced' : 'email_soft_bounced',\n      channel: 'email',\n      metadata: {\n        bounce_type: bounce.bounce_type,\n        reason: bounce.reason,\n        bounce_code: bounce.bounce_code,\n        resend_email_id: bounce.resend_email_id,\n        from_email: bounce.from_email\n      }\n    },\n    // Domain reputation tracking\n    from_domain: bounce.from_email ? bounce.from_email.split('@')[1] : null\n  }\n}];"
+      },
+      "id": "process-bounce",
+      "name": "Process Bounce",
+      "type": "n8n-nodes-base.code",
+      "position": [1000, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [{ "value1": "={{ $json.is_hard_bounce }}", "value2": true }]
+        }
+      },
+      "id": "hard-bounce-check",
+      "name": "Hard Bounce?",
+      "type": "n8n-nodes-base.if",
+      "position": [1250, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "leads",
+        "filters": {
+          "conditions": [{ "keyName": "id", "condition": "eq", "keyValue": "={{ $json.lead_id }}" }]
+        },
+        "columns": "status,email_validated,cadence_paused"
+      },
+      "id": "update-lead-bounced",
+      "name": "Mark Lead Bounced",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1500, 200],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "interactions",
+        "columns": "lead_id,type,channel,metadata"
+      },
+      "id": "log-bounce-interaction",
+      "name": "Log Bounce Interaction",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1500, 400],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Update domain reputation on hard bounce\nconst data = $input.first().json;\n\nif (!data.from_domain) return [];\n\n// Track bounce for domain health\nreturn [{\n  json: {\n    domain: data.from_domain,\n    note: 'CONFIGURE: Increment domain bounce counter via Supabase RPC',\n    query: `UPDATE email_domains SET reputation_score = GREATEST(0, reputation_score - 5) WHERE domain = '${data.from_domain}'`\n  }\n}];"
+      },
+      "id": "update-domain-reputation",
+      "name": "Update Domain Reputation",
+      "type": "n8n-nodes-base.code",
+      "position": [1750, 200],
+      "typeVersion": 2,
+      "notes": "CONFIGURE: Replace with actual Supabase RPC call to decrement domain reputation"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ processed: true, lead_id: $json.lead_id || 'unmatched', type: $json.bounce_type }) }}"
+      },
+      "id": "response",
+      "name": "Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1750, 400],
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Resend Bounce Webhook": { "main": [[{ "node": "Parse Bounce Event", "type": "main", "index": 0 }]] },
+    "Parse Bounce Event": { "main": [[{ "node": "Find Lead by Email", "type": "main", "index": 0 }]] },
+    "Find Lead by Email": { "main": [[{ "node": "Process Bounce", "type": "main", "index": 0 }]] },
+    "Process Bounce": { "main": [[{ "node": "Hard Bounce?", "type": "main", "index": 0 }]] },
+    "Hard Bounce?": {
+      "main": [
+        [{ "node": "Mark Lead Bounced", "type": "main", "index": 0 }, { "node": "Log Bounce Interaction", "type": "main", "index": 0 }],
+        [{ "node": "Log Bounce Interaction", "type": "main", "index": 0 }]
+      ]
+    },
+    "Mark Lead Bounced": { "main": [[{ "node": "Update Domain Reputation", "type": "main", "index": 0 }]] },
+    "Log Bounce Interaction": { "main": [[{ "node": "Response", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "outbound" }, { "name": "leveron" }, { "name": "ob-lev-7" }]
+}

@@ -1,0 +1,160 @@
+{
+  "name": "WF-05 Reply Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "mailbox": "INBOX",
+        "options": {
+          "customEmailConfig": "CONFIGURE_IMAP_SETTINGS"
+        }
+      },
+      "id": "imap-trigger",
+      "name": "IMAP Email Trigger",
+      "type": "n8n-nodes-base.imapEmail",
+      "position": [250, 300],
+      "typeVersion": 2,
+      "notes": "CONFIGURE: Set IMAP credentials for reply-to inbox. Check every 5 minutes."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detect auto-replies and filter them out\nconst email = $input.first().json;\nconst subject = (email.subject || '').toLowerCase();\nconst headers = email.headers || {};\n\nconst AUTO_REPLY_PATTERNS = [\n  /out of office/i,\n  /fora do escrit[oó]rio/i,\n  /resposta autom[aá]tica/i,\n  /automatic reply/i,\n  /delivery (status )?notification/i,\n  /undeliverable/i,\n  /mail delivery (system|subsystem)/i,\n  /n[aã]o entregue/i,\n  /vacation/i,\n  /auto-?reply/i,\n  /ausente/i\n];\n\nconst isAutoReply = AUTO_REPLY_PATTERNS.some(p => p.test(subject)) ||\n  headers['x-auto-response-suppress'] ||\n  headers['auto-submitted'] === 'auto-replied';\n\nreturn [{\n  json: {\n    from: email.from,\n    subject: email.subject,\n    body_snippet: (email.text || '').substring(0, 200),\n    date: email.date,\n    message_id: email.messageId,\n    in_reply_to: headers['in-reply-to'],\n    is_auto_reply: isAutoReply\n  }\n}];"
+      },
+      "id": "parse-reply",
+      "name": "Parse Reply & Detect Auto-Reply",
+      "type": "n8n-nodes-base.code",
+      "position": [500, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [{ "value1": "={{ $json.is_auto_reply }}", "value2": true }]
+        }
+      },
+      "id": "auto-reply-check",
+      "name": "Is Auto-Reply?",
+      "type": "n8n-nodes-base.if",
+      "position": [750, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "interactions",
+        "columns": "lead_id,type,channel,metadata"
+      },
+      "id": "log-auto-reply",
+      "name": "Log Auto-Reply (No Action)",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1000, 150],
+      "typeVersion": 1,
+      "notes": "Log auto-reply but don't pause cadence"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "schema": "public",
+        "table": "leads",
+        "returnAll": false,
+        "limit": 1,
+        "filters": {
+          "conditions": [{ "keyName": "email", "condition": "eq", "keyValue": "={{ $json.from }}" }]
+        }
+      },
+      "id": "find-lead",
+      "name": "Find Lead by Email",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1000, 450],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Update lead: pause cadence, set replied status\nconst reply = $('Parse Reply & Detect Auto-Reply').first().json;\nconst lead = $input.first().json;\n\nif (!lead || !lead.id) {\n  console.log('Unmatched reply from:', reply.from);\n  return [{ json: { unmatched: true, from: reply.from, subject: reply.subject } }];\n}\n\nreturn [{\n  json: {\n    lead_id: lead.id,\n    lead_name: `${lead.first_name} ${lead.last_name || ''}`.trim(),\n    company_name: lead.company_name,\n    reply_subject: reply.subject,\n    reply_snippet: reply.body_snippet,\n    reply_date: reply.date,\n    lead_update: {\n      status: 'replied',\n      cadence_paused: true,\n      emails_replied: (lead.emails_replied || 0) + 1,\n      last_replied_at: new Date().toISOString()\n    },\n    interaction: {\n      lead_id: lead.id,\n      type: 'email_replied',\n      channel: 'email',\n      metadata: {\n        subject: reply.subject,\n        snippet: reply.body_snippet,\n        message_id: reply.message_id,\n        in_reply_to: reply.in_reply_to\n      }\n    }\n  }\n}];"
+      },
+      "id": "process-reply",
+      "name": "Process Real Reply",
+      "type": "n8n-nodes-base.code",
+      "position": [1250, 450],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "leads",
+        "filters": {
+          "conditions": [{ "keyName": "id", "condition": "eq", "keyValue": "={{ $json.lead_id }}" }]
+        },
+        "columns": "status,cadence_paused,emails_replied,last_replied_at"
+      },
+      "id": "update-lead-replied",
+      "name": "Update Lead (Replied)",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1500, 350],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "interactions",
+        "columns": "lead_id,type,channel,metadata"
+      },
+      "id": "log-reply-interaction",
+      "name": "Log Reply Interaction",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1500, 550],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "CONFIGURE_NOTIFICATION_WEBHOOK_URL",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"New reply from {{ $json.lead_name }} ({{ $json.company_name }})\\nSubject: {{ $json.reply_subject }}\\nPreview: {{ $json.reply_snippet }}\"\n}"
+      },
+      "id": "notify-sales",
+      "name": "Notify Sales Team",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1750, 450],
+      "typeVersion": 4.2,
+      "continueOnFail": true,
+      "notes": "CONFIGURE: Set webhook URL (Slack, email, or custom endpoint)"
+    }
+  ],
+  "connections": {
+    "IMAP Email Trigger": { "main": [[{ "node": "Parse Reply & Detect Auto-Reply", "type": "main", "index": 0 }]] },
+    "Parse Reply & Detect Auto-Reply": { "main": [[{ "node": "Is Auto-Reply?", "type": "main", "index": 0 }]] },
+    "Is Auto-Reply?": {
+      "main": [
+        [{ "node": "Log Auto-Reply (No Action)", "type": "main", "index": 0 }],
+        [{ "node": "Find Lead by Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Find Lead by Email": { "main": [[{ "node": "Process Real Reply", "type": "main", "index": 0 }]] },
+    "Process Real Reply": { "main": [[{ "node": "Update Lead (Replied)", "type": "main", "index": 0 }, { "node": "Log Reply Interaction", "type": "main", "index": 0 }]] },
+    "Update Lead (Replied)": { "main": [[{ "node": "Notify Sales Team", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "outbound" }, { "name": "leveron" }, { "name": "ob-lev-7" }]
+}

@@ -1,0 +1,95 @@
+{
+  "name": "WF-AUX Cadence Activation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "activate-cadence",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Activation Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "typeVersion": 2,
+      "notes": "POST with { icp_id, limit } to activate enriched leads into cadence"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "schema": "public",
+        "table": "leads",
+        "returnAll": false,
+        "limit": "={{ $json.body?.limit || 50 }}",
+        "filters": {
+          "conditions": [
+            { "keyName": "status", "condition": "eq", "keyValue": "enriched" },
+            { "keyName": "email_validated", "condition": "eq", "keyValue": "true" }
+          ]
+        }
+      },
+      "id": "fetch-enriched",
+      "name": "Fetch Enriched Leads",
+      "type": "n8n-nodes-base.supabase",
+      "position": [500, 300],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Activate leads: set status to in_cadence, assign cadence\nconst leads = $input.all().map(i => i.json);\nconst now = new Date().toISOString();\n\nreturn leads.map(lead => ({\n  json: {\n    id: lead.id,\n    status: 'in_cadence',\n    cadence_step: 0,\n    cadence_started_at: now,\n    cadence_paused: false\n    // cadence_id should be set based on ICP default cadence\n  }\n}));"
+      },
+      "id": "activate-leads",
+      "name": "Set Cadence Active",
+      "type": "n8n-nodes-base.code",
+      "position": [750, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "leads",
+        "filters": {
+          "conditions": [{ "keyName": "id", "condition": "eq", "keyValue": "={{ $json.id }}" }]
+        },
+        "columns": "status,cadence_step,cadence_started_at,cadence_paused"
+      },
+      "id": "update-leads",
+      "name": "Update Leads in CRM",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1000, 300],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ activated: $input.all().length, timestamp: new Date().toISOString() }) }}"
+      },
+      "id": "response",
+      "name": "Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1250, 300],
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Activation Trigger": { "main": [[{ "node": "Fetch Enriched Leads", "type": "main", "index": 0 }]] },
+    "Fetch Enriched Leads": { "main": [[{ "node": "Set Cadence Active", "type": "main", "index": 0 }]] },
+    "Set Cadence Active": { "main": [[{ "node": "Update Leads in CRM", "type": "main", "index": 0 }]] },
+    "Update Leads in CRM": { "main": [[{ "node": "Response", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "outbound" }, { "name": "leveron" }, { "name": "auxiliary" }]
+}

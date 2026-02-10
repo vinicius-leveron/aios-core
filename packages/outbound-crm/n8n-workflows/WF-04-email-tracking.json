@@ -1,0 +1,154 @@
+{
+  "name": "WF-04 Email Tracking Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "email-tracking",
+        "responseMode": "responseNode"
+      },
+      "id": "tracking-webhook",
+      "name": "Tracking Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "typeVersion": 2,
+      "notes": "Receives tracking events from Edge Function (open/click)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and validate tracking event\nconst body = $input.first().json.body;\n\nif (!body || !body.event || !body.lead_id) {\n  return [{ json: { error: 'Missing required fields: event, lead_id' } }];\n}\n\nconst validEvents = ['open', 'click'];\nif (!validEvents.includes(body.event)) {\n  return [{ json: { error: `Invalid event type: ${body.event}` } }];\n}\n\nreturn [{\n  json: {\n    lead_id: body.lead_id,\n    event: body.event,\n    email_id: body.email_id || null,\n    link_url: body.link_url || null,\n    user_agent: body.user_agent || '',\n    ip_address: body.ip_address || '',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse-event",
+      "name": "Parse Tracking Event",
+      "type": "n8n-nodes-base.code",
+      "position": [500, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter known bots / pre-fetchers\nconst event = $input.first().json;\nconst ua = (event.user_agent || '').toLowerCase();\n\nconst BOT_PATTERNS = [\n  /googlebot/i,\n  /bingbot/i,\n  /yahoo.*slurp/i,\n  /outlook-ios/i,\n  /microsoft office/i,\n  /mozilla.*5\\.0.*compatible/i,\n  /wget/i,\n  /curl/i,\n  /python-requests/i,\n  /go-http-client/i,\n  /java/i,\n  /barracuda/i,\n  /proofpoint/i,\n  /mimecast/i\n];\n\nconst isBot = BOT_PATTERNS.some(p => p.test(ua));\n\nreturn [{\n  json: {\n    ...event,\n    is_bot: isBot\n  }\n}];"
+      },
+      "id": "bot-filter",
+      "name": "Bot / Prefetch Filter",
+      "type": "n8n-nodes-base.code",
+      "position": [750, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [{ "value1": "={{ $json.is_bot }}", "value2": true }]
+        }
+      },
+      "id": "is-bot-check",
+      "name": "Is Bot?",
+      "type": "n8n-nodes-base.if",
+      "position": [1000, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ignored', reason: 'bot' }) }}"
+      },
+      "id": "response-bot",
+      "name": "Response (Bot Ignored)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1250, 150],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deduplicate: check if same event was already recorded in last 60 seconds\n// (prevents double-counting from email clients that load images multiple times)\nconst event = $input.first().json;\n\n// Build dedup key\nconst dedupKey = `${event.lead_id}_${event.event}_${event.email_id || 'none'}`;\nconst dedupWindow = 60; // seconds\n\nreturn [{\n  json: {\n    ...event,\n    dedup_key: dedupKey,\n    dedup_window_seconds: dedupWindow\n  }\n}];"
+      },
+      "id": "dedup-check",
+      "name": "Dedup Check",
+      "type": "n8n-nodes-base.code",
+      "position": [1250, 450],
+      "typeVersion": 2,
+      "notes": "CONFIGURE: Add Supabase query to check interactions table for recent duplicate"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare interaction record and lead update\nconst event = $input.first().json;\n\nconst interaction = {\n  lead_id: event.lead_id,\n  type: event.event === 'open' ? 'email_opened' : 'email_clicked',\n  channel: 'email',\n  metadata: {\n    email_id: event.email_id,\n    link_url: event.link_url,\n    user_agent: event.user_agent,\n    ip_address: event.ip_address,\n    timestamp: event.timestamp\n  }\n};\n\n// Lead field to increment\nconst leadUpdate = {};\nif (event.event === 'open') {\n  leadUpdate.field = 'emails_opened';\n} else if (event.event === 'click') {\n  leadUpdate.field = 'emails_clicked';\n}\n\nreturn [{\n  json: {\n    lead_id: event.lead_id,\n    interaction: interaction,\n    lead_update_field: leadUpdate.field,\n    event_type: event.event\n  }\n}];"
+      },
+      "id": "prepare-records",
+      "name": "Prepare Records",
+      "type": "n8n-nodes-base.code",
+      "position": [1500, 450],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "interactions",
+        "columns": "lead_id,type,channel,metadata"
+      },
+      "id": "insert-interaction",
+      "name": "Log Tracking Interaction",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1750, 350],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/leads?id=eq.{{ $json.lead_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"{{ $json.lead_update_field }}\": \"{{ $json.lead_update_field }}\"\n}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "increment-lead-counter",
+      "name": "Increment Lead Counter",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1750, 550],
+      "typeVersion": 4.2,
+      "continueOnFail": true,
+      "notes": "CONFIGURE: Use Supabase RPC to atomically increment emails_opened or emails_clicked"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'tracked', event: $json.event_type, lead_id: $json.lead_id }) }}"
+      },
+      "id": "response-ok",
+      "name": "Response (OK)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [2000, 450],
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Tracking Webhook": { "main": [[{ "node": "Parse Tracking Event", "type": "main", "index": 0 }]] },
+    "Parse Tracking Event": { "main": [[{ "node": "Bot / Prefetch Filter", "type": "main", "index": 0 }]] },
+    "Bot / Prefetch Filter": { "main": [[{ "node": "Is Bot?", "type": "main", "index": 0 }]] },
+    "Is Bot?": {
+      "main": [
+        [{ "node": "Response (Bot Ignored)", "type": "main", "index": 0 }],
+        [{ "node": "Dedup Check", "type": "main", "index": 0 }]
+      ]
+    },
+    "Dedup Check": { "main": [[{ "node": "Prepare Records", "type": "main", "index": 0 }]] },
+    "Prepare Records": { "main": [[{ "node": "Log Tracking Interaction", "type": "main", "index": 0 }, { "node": "Increment Lead Counter", "type": "main", "index": 0 }]] },
+    "Log Tracking Interaction": { "main": [[{ "node": "Response (OK)", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "outbound" }, { "name": "leveron" }, { "name": "ob-lev-6" }]
+}

@@ -1,0 +1,152 @@
+{
+  "name": "WF-10 A/B Testing Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 18 * * 1-5" }]
+        }
+      },
+      "id": "daily-cron",
+      "name": "Daily 6PM BRT (Weekdays)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "typeVersion": 1.2,
+      "notes": "Evaluates experiments daily at 6PM BRT (21:00 UTC)"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ab-test",
+        "responseMode": "responseNode"
+      },
+      "id": "manual-trigger",
+      "name": "Manual Evaluate",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 500],
+      "typeVersion": 2,
+      "notes": "POST with { experiment_id } to manually evaluate a specific experiment"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "schema": "public",
+        "table": "experiments",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            { "keyName": "status", "condition": "eq", "keyValue": "running" }
+          ]
+        }
+      },
+      "id": "fetch-experiments",
+      "name": "Fetch Running Experiments",
+      "type": "n8n-nodes-base.supabase",
+      "position": [500, 300],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// For each running experiment, calculate statistical significance\nconst experiments = $input.all().map(i => i.json);\nconst results = [];\n\nfor (const exp of experiments) {\n  const variants = exp.variants || {};\n  const variantKeys = Object.keys(variants);\n  \n  if (variantKeys.length < 2) continue;\n  \n  // Get metrics for each variant\n  // NOTE: In production, these counts come from Supabase queries\n  // For now, structure the expected format\n  const variantData = variantKeys.map(key => ({\n    key,\n    ...variants[key],\n    sent: variants[key].sent || 0,\n    opened: variants[key].opened || 0,\n    clicked: variants[key].clicked || 0,\n    replied: variants[key].replied || 0\n  }));\n  \n  // Calculate rates\n  for (const v of variantData) {\n    v.open_rate = v.sent > 0 ? v.opened / v.sent : 0;\n    v.click_rate = v.sent > 0 ? v.clicked / v.sent : 0;\n    v.reply_rate = v.sent > 0 ? v.replied / v.sent : 0;\n  }\n  \n  // Primary metric for significance test\n  const primaryMetric = exp.primary_metric || 'open_rate';\n  \n  // Z-test for two proportions (A vs B)\n  const a = variantData[0];\n  const b = variantData[1];\n  \n  const p1 = a[primaryMetric] || 0;\n  const p2 = b[primaryMetric] || 0;\n  const n1 = a.sent || 0;\n  const n2 = b.sent || 0;\n  \n  let zScore = 0;\n  let pValue = 1;\n  let significant = false;\n  let winner = null;\n  const MIN_SAMPLE = exp.min_sample_size || 100;\n  const hasMinSample = n1 >= MIN_SAMPLE && n2 >= MIN_SAMPLE;\n  \n  if (hasMinSample && n1 > 0 && n2 > 0) {\n    // Pooled proportion\n    const pPool = (p1 * n1 + p2 * n2) / (n1 + n2);\n    const se = Math.sqrt(pPool * (1 - pPool) * (1/n1 + 1/n2));\n    \n    if (se > 0) {\n      zScore = (p1 - p2) / se;\n      // Approximate p-value from z-score (two-tailed)\n      const absZ = Math.abs(zScore);\n      pValue = Math.exp(-0.5 * absZ * absZ) / Math.sqrt(2 * Math.PI);\n      // Rough two-tailed approximation\n      pValue = 2 * pValue;\n      \n      significant = pValue < 0.05;\n      \n      if (significant) {\n        winner = zScore > 0 ? a.key : b.key;\n      }\n    }\n  }\n  \n  // Check if experiment should be auto-concluded\n  const daysSinceStart = Math.floor(\n    (Date.now() - new Date(exp.created_at).getTime()) / (1000 * 60 * 60 * 24)\n  );\n  const maxDays = exp.max_duration_days || 14;\n  const shouldConclude = significant || daysSinceStart >= maxDays;\n  \n  results.push({\n    experiment_id: exp.id,\n    experiment_name: exp.name,\n    template_id: exp.template_id,\n    cadence_step: exp.cadence_step,\n    primary_metric: primaryMetric,\n    days_running: daysSinceStart,\n    variants: variantData.map(v => ({\n      key: v.key,\n      sent: v.sent,\n      [primaryMetric]: (v[primaryMetric] * 100).toFixed(1) + '%'\n    })),\n    z_score: zScore.toFixed(3),\n    p_value: pValue.toFixed(4),\n    significant: significant,\n    has_min_sample: hasMinSample,\n    winner: winner,\n    should_conclude: shouldConclude,\n    conclusion_reason: significant ? 'statistical_significance' : \n      (daysSinceStart >= maxDays ? 'max_duration_reached' : 'still_running')\n  });\n}\n\nconsole.log(`Evaluated ${results.length} experiments, ${results.filter(r => r.should_conclude).length} ready to conclude`);\n\nreturn results.map(r => ({ json: r }));"
+      },
+      "id": "evaluate-experiments",
+      "name": "Evaluate Statistical Significance",
+      "type": "n8n-nodes-base.code",
+      "position": [800, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [{ "value1": "={{ $json.should_conclude }}", "value2": true }]
+        }
+      },
+      "id": "should-conclude",
+      "name": "Should Conclude?",
+      "type": "n8n-nodes-base.if",
+      "position": [1100, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Conclude experiment: update status and set winner\nconst exp = $input.first().json;\n\nreturn [{\n  json: {\n    id: exp.experiment_id,\n    status: 'completed',\n    winner: exp.winner || 'no_winner',\n    results: {\n      variants: exp.variants,\n      z_score: exp.z_score,\n      p_value: exp.p_value,\n      significant: exp.significant,\n      conclusion_reason: exp.conclusion_reason,\n      concluded_at: new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "id": "conclude-experiment",
+      "name": "Conclude Experiment",
+      "type": "n8n-nodes-base.code",
+      "position": [1350, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "experiments",
+        "filters": {
+          "conditions": [{ "keyName": "id", "condition": "eq", "keyValue": "={{ $json.id }}" }]
+        },
+        "columns": "status,winner,results"
+      },
+      "id": "update-experiment",
+      "name": "Update Experiment (Concluded)",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1600, 300],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "CONFIGURE_NOTIFICATION_WEBHOOK_URL",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"A/B Test Concluded: {{ $json.experiment_name }}\\nWinner: {{ $json.winner || 'No clear winner' }}\\nMetric: {{ $json.primary_metric }}\\nP-value: {{ $json.p_value }}\\nDuration: {{ $json.days_running }} days\"\n}"
+      },
+      "id": "notify-conclusion",
+      "name": "Notify: Test Concluded",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1850, 300],
+      "typeVersion": 4.2,
+      "continueOnFail": true,
+      "notes": "CONFIGURE: Set notification webhook URL"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ evaluated: $input.all().length, concluded: $input.all().filter(i => i.json.should_conclude).length }) }}"
+      },
+      "id": "response",
+      "name": "Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1350, 550],
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Daily 6PM BRT (Weekdays)": { "main": [[{ "node": "Fetch Running Experiments", "type": "main", "index": 0 }]] },
+    "Manual Evaluate": { "main": [[{ "node": "Fetch Running Experiments", "type": "main", "index": 0 }]] },
+    "Fetch Running Experiments": { "main": [[{ "node": "Evaluate Statistical Significance", "type": "main", "index": 0 }]] },
+    "Evaluate Statistical Significance": { "main": [[{ "node": "Should Conclude?", "type": "main", "index": 0 }]] },
+    "Should Conclude?": {
+      "main": [
+        [{ "node": "Conclude Experiment", "type": "main", "index": 0 }],
+        [{ "node": "Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Conclude Experiment": { "main": [[{ "node": "Update Experiment (Concluded)", "type": "main", "index": 0 }]] },
+    "Update Experiment (Concluded)": { "main": [[{ "node": "Notify: Test Concluded", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "outbound" }, { "name": "leveron" }, { "name": "ob-lev-9" }]
+}
