@@ -80,6 +80,10 @@ import {
   WifiOff,
   Globe,
 
+  // Email/Outbound
+  Mail,
+  Send,
+
   // GitHub
   Github,
 
@@ -177,6 +181,10 @@ export const iconMap = {
   'wifi-off': WifiOff,
   globe: Globe,
 
+  // Email/Outbound
+  mail: Mail,
+  send: Send,
+
   // GitHub
   github: Github,
 
@@ -273,6 +281,8 @@ export {
   WifiOff,
   Globe,
   Github,
+  Mail,
+  Send,
   Map,
   TrendingUp,
   Activity,
