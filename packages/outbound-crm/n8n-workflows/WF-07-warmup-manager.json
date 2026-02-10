@@ -1,0 +1,210 @@
+{
+  "name": "WF-07 Domain Warmup Manager",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 7 * * 1" }]
+        }
+      },
+      "id": "weekly-cron",
+      "name": "Weekly Monday 7AM BRT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "typeVersion": 1.2,
+      "notes": "Evaluates domain warmup progression every Monday at 7AM BRT (10:00 UTC)"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "warmup-manager",
+        "responseMode": "responseNode"
+      },
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 500],
+      "typeVersion": 2,
+      "notes": "POST with optional { domain, action: 'advance' | 'pause' | 'status' }"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "schema": "public",
+        "table": "email_domains",
+        "returnAll": true,
+        "filters": {
+          "conditions": [{ "keyName": "active", "condition": "eq", "keyValue": "true" }]
+        }
+      },
+      "id": "fetch-domains",
+      "name": "Fetch Active Domains",
+      "type": "n8n-nodes-base.supabase",
+      "position": [500, 400],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Warmup schedule:\n// Phase 1 (week 1):   5 emails/day\n// Phase 2 (week 2):  15 emails/day\n// Phase 3 (week 3):  30 emails/day\n// Phase 4 (week 4+): 50 emails/day\n// Graduated:         50+ emails/day (monitoring only)\n\nconst WARMUP_SCHEDULE = {\n  'phase_1': { daily_limit: 5,  next_phase: 'phase_2', min_days: 7,  description: 'Week 1: Slow start' },\n  'phase_2': { daily_limit: 15, next_phase: 'phase_3', min_days: 7,  description: 'Week 2: Ramping up' },\n  'phase_3': { daily_limit: 30, next_phase: 'phase_4', min_days: 7,  description: 'Week 3: Moderate volume' },\n  'phase_4': { daily_limit: 50, next_phase: 'graduated', min_days: 7, description: 'Week 4: Target volume' },\n  'graduated': { daily_limit: 50, next_phase: null, min_days: null, description: 'Warmup complete' },\n  'paused':   { daily_limit: 0,  next_phase: null, min_days: null, description: 'Paused - reputation issue' },\n  'test':     { daily_limit: 10, next_phase: 'phase_1', min_days: 1, description: 'Test mode' },\n};\n\nconst domains = $input.all().map(i => i.json);\nconst results = [];\n\nfor (const domain of domains) {\n  const currentPhase = domain.warmup_phase || 'phase_1';\n  const schedule = WARMUP_SCHEDULE[currentPhase];\n  \n  if (!schedule) {\n    results.push({\n      domain: domain.domain,\n      domain_id: domain.id,\n      action: 'skip',\n      reason: `Unknown warmup phase: ${currentPhase}`,\n      current_phase: currentPhase,\n    });\n    continue;\n  }\n  \n  // Check reputation health\n  const reputation = domain.reputation_score || 100;\n  if (reputation < 50 && currentPhase !== 'paused') {\n    results.push({\n      domain: domain.domain,\n      domain_id: domain.id,\n      action: 'pause',\n      reason: `Reputation ${reputation} below threshold (50). Auto-pausing.`,\n      current_phase: currentPhase,\n      new_phase: 'paused',\n      new_daily_limit: 0,\n      alert: true,\n    });\n    continue;\n  }\n  \n  // Check if ready to advance\n  const phaseStartedAt = domain.warmup_phase_started_at || domain.created_at;\n  const daysSincePhaseStart = Math.floor(\n    (Date.now() - new Date(phaseStartedAt).getTime()) / (1000 * 60 * 60 * 24)\n  );\n  \n  if (schedule.next_phase && schedule.min_days && daysSincePhaseStart >= schedule.min_days) {\n    // Check bounce rate in current phase isn't too high\n    // If reputation is still good, advance\n    if (reputation >= 70) {\n      const nextSchedule = WARMUP_SCHEDULE[schedule.next_phase];\n      results.push({\n        domain: domain.domain,\n        domain_id: domain.id,\n        action: 'advance',\n        reason: `${daysSincePhaseStart} days in ${currentPhase}, reputation ${reputation} OK. Advancing.`,\n        current_phase: currentPhase,\n        new_phase: schedule.next_phase,\n        new_daily_limit: nextSchedule.daily_limit,\n        alert: false,\n      });\n    } else {\n      results.push({\n        domain: domain.domain,\n        domain_id: domain.id,\n        action: 'hold',\n        reason: `${daysSincePhaseStart} days in ${currentPhase}, but reputation ${reputation} < 70. Holding.`,\n        current_phase: currentPhase,\n        alert: true,\n      });\n    }\n  } else {\n    // Not ready to advance yet\n    const daysRemaining = schedule.min_days ? schedule.min_days - daysSincePhaseStart : 0;\n    results.push({\n      domain: domain.domain,\n      domain_id: domain.id,\n      action: 'no_change',\n      reason: schedule.next_phase \n        ? `${daysSincePhaseStart}/${schedule.min_days} days in ${currentPhase}. ${daysRemaining} days remaining.`\n        : `${currentPhase}: ${schedule.description}`,\n      current_phase: currentPhase,\n      days_in_phase: daysSincePhaseStart,\n      days_remaining: daysRemaining > 0 ? daysRemaining : 0,\n    });\n  }\n}\n\nconsole.log(`Evaluated ${domains.length} domains: ${results.filter(r => r.action === 'advance').length} to advance, ${results.filter(r => r.action === 'pause').length} to pause`);\n\nreturn results.map(r => ({ json: r }));"
+      },
+      "id": "evaluate-warmup",
+      "name": "Evaluate Warmup Status",
+      "type": "n8n-nodes-base.code",
+      "position": [800, 400],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [{ "value1": "={{ $json.action }}", "operation": "equals", "value2": "advance" }]
+        }
+      },
+      "id": "needs-update",
+      "name": "Needs Update?",
+      "type": "n8n-nodes-base.if",
+      "position": [1100, 300],
+      "typeVersion": 2,
+      "notes": "Routes advance/pause actions to update node"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [{ "value1": "={{ $json.action }}", "operation": "equals", "value2": "pause" }]
+        }
+      },
+      "id": "needs-pause",
+      "name": "Needs Pause?",
+      "type": "n8n-nodes-base.if",
+      "position": [1100, 500],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "email_domains",
+        "filters": {
+          "conditions": [{ "keyName": "id", "condition": "eq", "keyValue": "={{ $json.domain_id }}" }]
+        },
+        "columns": "warmup_phase,daily_limit,warmup_phase_started_at"
+      },
+      "id": "advance-domain",
+      "name": "Advance Domain Phase",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1400, 200],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      },
+      "notes": "Sets new phase, new daily_limit, resets phase_started_at"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": "public",
+        "table": "email_domains",
+        "filters": {
+          "conditions": [{ "keyName": "id", "condition": "eq", "keyValue": "={{ $json.domain_id }}" }]
+        },
+        "columns": "warmup_phase,daily_limit,active"
+      },
+      "id": "pause-domain",
+      "name": "Pause Domain",
+      "type": "n8n-nodes-base.supabase",
+      "position": [1400, 500],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build summary for notification\nconst allResults = $('Evaluate Warmup Status').all().map(i => i.json);\n\nconst summary = {\n  total_domains: allResults.length,\n  advanced: allResults.filter(r => r.action === 'advance').map(r => `${r.domain}: ${r.current_phase} -> ${r.new_phase} (${r.new_daily_limit}/day)`),\n  paused: allResults.filter(r => r.action === 'pause').map(r => `${r.domain}: ${r.reason}`),\n  holding: allResults.filter(r => r.action === 'hold').map(r => `${r.domain}: ${r.reason}`),\n  no_change: allResults.filter(r => r.action === 'no_change').map(r => `${r.domain}: ${r.reason}`),\n  has_alerts: allResults.some(r => r.alert),\n};\n\nconst lines = ['=== WARMUP MANAGER REPORT ===', ''];\n\nif (summary.advanced.length > 0) {\n  lines.push('ADVANCED:');\n  summary.advanced.forEach(l => lines.push(`  + ${l}`));\n  lines.push('');\n}\n\nif (summary.paused.length > 0) {\n  lines.push('PAUSED (action needed):');\n  summary.paused.forEach(l => lines.push(`  ! ${l}`));\n  lines.push('');\n}\n\nif (summary.holding.length > 0) {\n  lines.push('HOLDING (reputation recovery needed):');\n  summary.holding.forEach(l => lines.push(`  ? ${l}`));\n  lines.push('');\n}\n\nif (summary.no_change.length > 0) {\n  lines.push('STATUS QUO:');\n  summary.no_change.forEach(l => lines.push(`  - ${l}`));\n}\n\nreturn [{ json: { ...summary, formatted_text: lines.join('\\n') } }];"
+      },
+      "id": "build-summary",
+      "name": "Build Summary",
+      "type": "n8n-nodes-base.code",
+      "position": [1400, 350],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [{ "value1": "={{ $json.has_alerts }}", "value2": true }]
+        }
+      },
+      "id": "has-alerts",
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "position": [1650, 350],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "CONFIGURE_NOTIFICATION_WEBHOOK_URL",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"{{ $json.formatted_text }}\"\n}"
+      },
+      "id": "notify-alerts",
+      "name": "Notify: Warmup Alerts",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1900, 250],
+      "typeVersion": 4.2,
+      "continueOnFail": true,
+      "notes": "CONFIGURE: Set notification webhook URL"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "response",
+      "name": "Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1900, 450],
+      "typeVersion": 1
+    }
+  ],
+  "connections": {
+    "Weekly Monday 7AM BRT": { "main": [[{ "node": "Fetch Active Domains", "type": "main", "index": 0 }]] },
+    "Manual Trigger": { "main": [[{ "node": "Fetch Active Domains", "type": "main", "index": 0 }]] },
+    "Fetch Active Domains": { "main": [[{ "node": "Evaluate Warmup Status", "type": "main", "index": 0 }]] },
+    "Evaluate Warmup Status": { "main": [[{ "node": "Needs Update?", "type": "main", "index": 0 }, { "node": "Needs Pause?", "type": "main", "index": 0 }, { "node": "Build Summary", "type": "main", "index": 0 }]] },
+    "Needs Update?": {
+      "main": [
+        [{ "node": "Advance Domain Phase", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Needs Pause?": {
+      "main": [
+        [{ "node": "Pause Domain", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Build Summary": { "main": [[{ "node": "Has Alerts?", "type": "main", "index": 0 }]] },
+    "Has Alerts?": {
+      "main": [
+        [{ "node": "Notify: Warmup Alerts", "type": "main", "index": 0 }],
+        [{ "node": "Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notify: Warmup Alerts": { "main": [[{ "node": "Response", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "outbound" }, { "name": "leveron" }, { "name": "ob-lev-4" }]
+}

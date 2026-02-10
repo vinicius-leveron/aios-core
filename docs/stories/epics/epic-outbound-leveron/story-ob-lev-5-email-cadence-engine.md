@@ -1,7 +1,7 @@
 # Story OB-LEV-5: Email Cadence Engine
 
 **Epic:** [EPIC-OB-LEV - Outbound Leveron: Escritorios de Advocacia](EPIC-OB-LEV-INDEX.md)
-**Status:** Draft
+**Status:** In Progress
 **Priority:** Critical
 **Complexity:** Very High
 **Created:** 2026-02-09

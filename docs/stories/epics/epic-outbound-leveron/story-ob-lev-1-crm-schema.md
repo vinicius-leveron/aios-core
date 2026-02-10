@@ -1,7 +1,7 @@
 # Story OB-LEV-1: CRM Schema & Database Setup
 
 **Epic:** [EPIC-OB-LEV - Outbound Leveron: Escritorios de Advocacia](EPIC-OB-LEV-INDEX.md)
-**Status:** Draft
+**Status:** In Progress
 **Priority:** Critical
 **Complexity:** Medium
 **Created:** 2026-02-09
@@ -44,35 +44,35 @@ quality_gate_tools: ["schema-review", "migration-validation"]
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Design and create migration files (AC: 1-7)
-  - [ ] 1.1 Create migration for `icps` table (must be first - referenced by others)
-  - [ ] 1.2 Create migration for `cadences` table (references icps)
-  - [ ] 1.3 Create migration for `leads` table (references icps, cadences)
-  - [ ] 1.4 Create migration for `message_templates` table (references cadences)
-  - [ ] 1.5 Create migration for `interactions` table (references leads)
-  - [ ] 1.6 Create migration for `experiments` table (references icps)
-  - [ ] 1.7 Create migration for `email_domains` table (standalone)
-  - [ ] 1.8 Run migrations against Supabase instance
+- [x] Task 1: Design and create migration files (AC: 1-7)
+  - [x] 1.1 Create migration for `icps` table (must be first - referenced by others)
+  - [x] 1.2 Create migration for `cadences` table (references icps)
+  - [x] 1.3 Create migration for `leads` table (references icps, cadences)
+  - [x] 1.4 Create migration for `message_templates` table (references cadences)
+  - [x] 1.5 Create migration for `interactions` table (references leads)
+  - [x] 1.6 Create migration for `experiments` table (references icps)
+  - [x] 1.7 Create migration for `email_domains` table (standalone)
+  - [ ] 1.8 Run migrations against Supabase instance (BLOCKED: awaiting credentials)
   - [ ] 1.9 Verify all tables created with correct columns and types
 
-- [ ] Task 2: Create views (AC: 8, 9)
-  - [ ] 2.1 Create `pipeline_view` with status grouping and metrics
-  - [ ] 2.2 Create `cadence_performance` view with reply rate calculation
-  - [ ] 2.3 Verify views return correct data with test records
+- [x] Task 2: Create views (AC: 8, 9)
+  - [x] 2.1 Create `pipeline_view` with status grouping and metrics
+  - [x] 2.2 Create `cadence_performance` view with reply rate calculation
+  - [ ] 2.3 Verify views return correct data with test records (BLOCKED: awaiting deploy)
 
-- [ ] Task 3: Configure RLS and indexes (AC: 10, 13)
-  - [ ] 3.1 Enable RLS on all tables
-  - [ ] 3.2 Create policies for service role access (N8N will use service key)
-  - [ ] 3.3 Create indexes on frequently queried columns: leads.status, leads.icp_id, leads.cadence_id, leads.email, interactions.lead_id, interactions.created_at
-  - [ ] 3.4 Verify RLS blocks anonymous access but allows service role
+- [x] Task 3: Configure RLS and indexes (AC: 10, 13)
+  - [x] 3.1 Enable RLS on all tables
+  - [x] 3.2 Create policies for service role access (N8N will use service key)
+  - [x] 3.3 Create indexes on frequently queried columns
+  - [ ] 3.4 Verify RLS blocks anonymous access but allows service role (BLOCKED: awaiting deploy)
 
-- [ ] Task 4: Seed initial data (AC: 11, 12)
-  - [ ] 4.1 Insert ICP "escritorios_advocacia" with criteria JSONB
-  - [ ] 4.2 Insert cadence "leveron_escritorios_email_v1" with 4 steps
-  - [ ] 4.3 Insert 4 message templates (one per cadence step) with placeholder copy
-  - [ ] 4.4 Verify seed data is queryable
+- [x] Task 4: Seed initial data (AC: 11, 12)
+  - [x] 4.1 Insert ICP "escritorios_advocacia" with criteria JSONB
+  - [x] 4.2 Insert cadence "leveron_escritorios_email_v1" with 4 steps
+  - [x] 4.3 Insert 4 message templates (one per cadence step) with copy
+  - [ ] 4.4 Verify seed data is queryable (BLOCKED: awaiting deploy)
 
-- [ ] Task 5: Validation
+- [ ] Task 5: Validation (BLOCKED: awaiting Supabase credentials)
   - [ ] 5.1 Test insert/update/delete on each table
   - [ ] 5.2 Test foreign key constraints (orphan prevention)
   - [ ] 5.3 Test views with sample data
@@ -110,6 +110,7 @@ The project has Supabase MCP configured at `.aios-core/infrastructure/tools/mcp/
 | Date | Version | Description | Author |
 |------|---------|-------------|--------|
 | 2026-02-09 | 1.0 | Story created from EPIC-OB-LEV | @po |
+| 2026-02-10 | 1.1 | Migrations 001-012 created, seed data with email copy, RPC functions, A/B variants | @dev |
 
 ---
 

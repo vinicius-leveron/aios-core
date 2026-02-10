@@ -1,7 +1,7 @@
 # Story OB-LEV-6: Email Tracking System
 
 **Epic:** [EPIC-OB-LEV - Outbound Leveron: Escritorios de Advocacia](EPIC-OB-LEV-INDEX.md)
-**Status:** Draft
+**Status:** In Progress
 **Priority:** High
 **Complexity:** Medium
 **Created:** 2026-02-09

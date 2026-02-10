@@ -1,7 +1,7 @@
 # Story OB-LEV-8: Lead Scoring System
 
 **Epic:** [EPIC-OB-LEV - Outbound Leveron: Escritorios de Advocacia](EPIC-OB-LEV-INDEX.md)
-**Status:** Draft
+**Status:** In Progress
 **Priority:** Medium
 **Complexity:** Medium
 **Created:** 2026-02-09

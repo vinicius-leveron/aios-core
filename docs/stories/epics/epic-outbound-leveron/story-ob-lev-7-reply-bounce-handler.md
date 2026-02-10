@@ -1,7 +1,7 @@
 # Story OB-LEV-7: Reply & Bounce Handler
 
 **Epic:** [EPIC-OB-LEV - Outbound Leveron: Escritorios de Advocacia](EPIC-OB-LEV-INDEX.md)
-**Status:** Draft
+**Status:** In Progress
 **Priority:** High
 **Complexity:** Medium
 **Created:** 2026-02-09
