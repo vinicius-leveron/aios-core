@@ -1,33 +1,31 @@
 #!/usr/bin/env node
 
 /**
- * n8n Workflow Validator
+ * n8n Workflow Validator + Fixer + Deployer
  *
- * CLI tool to validate n8n workflow JSON files.
+ * CLI tool to validate, auto-fix, and deploy n8n workflow JSON files.
  * Connects to n8n API or reads local JSON files.
  *
  * Usage:
  *   # Validate all workflows from n8n instance
  *   node scripts/n8n-validator/index.mjs --url https://n8n.example.com --api-key YOUR_KEY
  *
- *   # Validate a single local JSON file
- *   node scripts/n8n-validator/index.mjs --file workflow.json
+ *   # Validate + auto-fix (outputs corrected JSON files)
+ *   node scripts/n8n-validator/index.mjs --url https://n8n.example.com --api-key KEY --fix
  *
- *   # Validate all JSON files in a directory
- *   node scripts/n8n-validator/index.mjs --dir ./exported-workflows/
+ *   # Validate + auto-fix + deploy back to n8n
+ *   node scripts/n8n-validator/index.mjs --url https://n8n.example.com --api-key KEY --fix --deploy
  *
- *   # Output as JSON
- *   node scripts/n8n-validator/index.mjs --url https://n8n.example.com --api-key KEY --json
- *
- *   # Only show errors (no warnings/info)
- *   node scripts/n8n-validator/index.mjs --file workflow.json --severity error
+ *   # Validate a local file, fix and save
+ *   node scripts/n8n-validator/index.mjs --file workflow.json --fix --output-dir ./fixed/
  *
  * Zero external dependencies. Requires Node.js 18+.
  */
 
-import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs'
-import { join, resolve, basename } from 'node:path'
+import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { validateWorkflow, SEVERITY } from './validators.mjs'
+import { fixWorkflow, deployWorkflow } from './fixer.mjs'
 
 // ============================================================================
 // CLI ARGUMENT PARSER
@@ -41,8 +39,12 @@ function parseArgs() {
     file: null,
     dir: null,
     json: false,
-    severity: 'all', // all, error, warning
+    severity: 'all',
     output: null,
+    outputDir: null,
+    fix: false,
+    deploy: false,
+    dryRun: false,
     help: false,
   }
 
@@ -76,12 +78,23 @@ function parseArgs() {
       case '-o':
         config.output = args[++i]
         break
+      case '--output-dir':
+        config.outputDir = args[++i]
+        break
+      case '--fix':
+        config.fix = true
+        break
+      case '--deploy':
+        config.deploy = true
+        break
+      case '--dry-run':
+        config.dryRun = true
+        break
       case '--help':
       case '-h':
         config.help = true
         break
       default:
-        // If it looks like a file path, treat as --file
         if (args[i].endsWith('.json')) {
           config.file = args[i]
         }
@@ -94,11 +107,10 @@ function parseArgs() {
 
 function printUsage() {
   console.log(`
-n8n Workflow Validator
-=====================
+n8n Workflow Validator + Fixer + Deployer
+==========================================
 
-Validates n8n workflow JSON files for structure, expressions, connections,
-credentials, and best practices.
+Validates, auto-fixes, and deploys n8n workflow JSON files.
 
 USAGE:
   node scripts/n8n-validator/index.mjs [options]
@@ -108,28 +120,61 @@ OPTIONS:
   --api-key, -k <key>     n8n API key for authentication
   --file, -f <path>       Path to a single workflow JSON file
   --dir, -d <path>        Path to directory with workflow JSON files
+  --fix                   Auto-fix safe issues (expressions, structure, deprecated nodes)
+  --deploy                Deploy fixed workflows back to n8n (requires --url + --fix)
+  --dry-run               Show what --deploy would do without actually deploying
+  --output-dir <path>     Save fixed workflow JSONs to directory
   --json, -j              Output results as JSON
   --severity, -s <level>  Filter: "all" (default), "error", "warning"
   --output, -o <path>     Write report to file
   --help, -h              Show this help message
 
-EXAMPLES:
-  # Validate all workflows from n8n instance
-  node scripts/n8n-validator/index.mjs --url https://n8n.example.com --api-key YOUR_KEY
+MODES:
+  Validate only (default):
+    node index.mjs --url https://n8n.example.com --api-key KEY
 
-  # Validate a local file
-  node scripts/n8n-validator/index.mjs --file my-workflow.json
+  Validate + Fix (save locally):
+    node index.mjs --url https://n8n.example.com --api-key KEY --fix --output-dir ./fixed/
 
-  # Validate directory, errors only, JSON output
-  node scripts/n8n-validator/index.mjs --dir ./exports/ --severity error --json
+  Validate + Fix + Deploy:
+    node index.mjs --url https://n8n.example.com --api-key KEY --fix --deploy
 
-VALIDATION CATEGORIES:
-  Structure    JSON format, required fields, node types, positions
-  Expression   ={{ }} syntax, $json/$node references, Code node checks
-  Connection   Orphan nodes, circular refs, webhook pairing
-  Credential   Missing credentials, hardcoded secrets, webhook auth
-  Best Practice  Error handling, deprecated nodes, workflow size
+  Validate + Fix + Dry Run (preview deploy):
+    node index.mjs --url https://n8n.example.com --api-key KEY --fix --deploy --dry-run
+
+AUTO-FIX RULES:
+  FIX-EXPR-001   Remove ={{ }} inside Code nodes
+  FIX-EXPR-003   Fix trailing dots in expressions
+  FIX-EXPR-020   Fix $node.Name for names with spaces -> $('Name With Spaces')
+  FIX-EXPR-030   Fix single braces ={expr} -> ={{ expr }}
+  FIX-STRUCT-030 Add settings.executionOrder = "v1"
+  FIX-STRUCT-031 Add missing meta object
+  FIX-BEST-010   Upgrade deprecated nodes (function->code, start->manualTrigger)
+  FIX-CONN-001   Remove ghost connections to non-existent nodes
+  FIX-CONN-011   Remove connections to non-existent targets
+  FIX-CONN-040   Fix webhook responseMode when no Respond node exists
+
+MANUAL REVIEW REQUIRED (not auto-fixed):
+  - Missing credentials (need to configure in n8n UI)
+  - Hardcoded secrets (need manual replacement)
+  - Orphan/disconnected nodes (may be intentional)
+  - Non-existent node references in expressions (ambiguous correction)
+  - Circular connections (may be intentional loops)
 `)
+}
+
+// ============================================================================
+// LOGGING
+// ============================================================================
+
+let logToStderr = false
+
+function log(...args) {
+  if (logToStderr) {
+    process.stderr.write(args.join(' ') + '\n')
+  } else {
+    console.log(...args)
+  }
 }
 
 // ============================================================================
@@ -177,14 +222,12 @@ async function fetchWorkflows(url, apiKey) {
       break
     }
 
-    // Check for pagination
     cursor = data.nextCursor
     if (!cursor || (Array.isArray(workflows) && workflows.length === 0)) break
   }
 
   log(`  Total workflows fetched: ${allWorkflows.length}`)
 
-  // Fetch full details for each workflow (the list endpoint may not include all data)
   const detailedWorkflows = []
   for (const wf of allWorkflows) {
     try {
@@ -199,13 +242,12 @@ async function fetchWorkflows(url, apiKey) {
         const detail = await detailResp.json()
         detailedWorkflows.push(detail)
       } else {
-        // Fallback to summary data
         detailedWorkflows.push(wf)
-        console.warn(`  Warning: Could not fetch details for workflow "${wf.name}" (${wf.id})`)
+        log(`  Warning: Could not fetch details for workflow "${wf.name}" (${wf.id})`)
       }
     } catch (err) {
       detailedWorkflows.push(wf)
-      console.warn(`  Warning: Error fetching details for "${wf.name}": ${err.message}`)
+      log(`  Warning: Error fetching details for "${wf.name}": ${err.message}`)
     }
   }
 
@@ -231,12 +273,10 @@ function loadWorkflowFile(filePath) {
     throw new Error(`Invalid JSON in ${filePath}: ${err.message}`)
   }
 
-  // Handle both single workflow and array of workflows
   if (Array.isArray(parsed)) {
     return parsed
   }
 
-  // Handle n8n export format (may have workflows array)
   if (parsed.workflows && Array.isArray(parsed.workflows)) {
     return parsed.workflows
   }
@@ -261,7 +301,7 @@ function loadWorkflowDirectory(dirPath) {
       const loaded = loadWorkflowFile(join(absDir, file))
       workflows.push(...loaded)
     } catch (err) {
-      console.warn(`  Skipping ${file}: ${err.message}`)
+      log(`  Skipping ${file}: ${err.message}`)
     }
   }
 
@@ -279,6 +319,9 @@ const ICONS = {
   PASS: '\x1b[32m PASS\x1b[0m',
   FAIL: '\x1b[31m FAIL\x1b[0m',
   REVIEW: '\x1b[33m REVIEW\x1b[0m',
+  FIX: '\x1b[35m[FIXED]\x1b[0m',
+  DEPLOY: '\x1b[32m[DEPLOYED]\x1b[0m',
+  SKIP: '\x1b[90m[SKIPPED]\x1b[0m',
 }
 
 function formatReport(results, config) {
@@ -288,21 +331,26 @@ function formatReport(results, config) {
 
   const lines = []
 
+  const mode = config.deploy ? 'Validate + Fix + Deploy' : config.fix ? 'Validate + Fix' : 'Validate'
+
   lines.push('')
   lines.push('\x1b[1m========================================================\x1b[0m')
-  lines.push('\x1b[1m  n8n Workflow Validation Report\x1b[0m')
+  lines.push(`\x1b[1m  n8n Workflow ${mode} Report\x1b[0m`)
   lines.push('\x1b[1m========================================================\x1b[0m')
   lines.push('')
 
-  // Global summary
   let totalErrors = 0
   let totalWarnings = 0
   let totalInfo = 0
+  let totalFixed = 0
+  let totalDeployed = 0
 
   for (const result of results) {
     totalErrors += result.summary.errors
     totalWarnings += result.summary.warnings
     totalInfo += result.summary.info
+    if (result.fixResult) totalFixed += result.fixResult.changelog.length
+    if (result.deployResult?.success) totalDeployed++
   }
 
   lines.push(`  Workflows analyzed: ${results.length}`)
@@ -310,9 +358,14 @@ function formatReport(results, config) {
   lines.push(`    ${ICONS.ERROR} Errors:   ${totalErrors}`)
   lines.push(`    ${ICONS.WARNING} Warnings: ${totalWarnings}`)
   lines.push(`    ${ICONS.INFO} Info:     ${totalInfo}`)
+  if (config.fix) {
+    lines.push(`    ${ICONS.FIX} Fixed:    ${totalFixed}`)
+  }
+  if (config.deploy) {
+    lines.push(`    ${ICONS.DEPLOY} Deployed: ${totalDeployed}/${results.length}`)
+  }
   lines.push('')
 
-  // Per-workflow results
   for (const result of results) {
     const verdict = ICONS[result.summary.verdict] || result.summary.verdict
     const activeLabel = result.workflow.active ? '\x1b[32m[ACTIVE]\x1b[0m' : '\x1b[90m[inactive]\x1b[0m'
@@ -322,7 +375,7 @@ function formatReport(results, config) {
     lines.push(`  ID: ${result.workflow.id} | Nodes: ${result.workflow.nodeCount}`)
     lines.push('\x1b[1m--------------------------------------------------------\x1b[0m')
 
-    // Filter issues by severity
+    // Issues
     let issues = result.issues
     if (config.severity === 'error') {
       issues = issues.filter(i => i.severity === SEVERITY.ERROR)
@@ -333,7 +386,6 @@ function formatReport(results, config) {
     if (issues.length === 0) {
       lines.push('  \x1b[32mNo issues found.\x1b[0m')
     } else {
-      // Group by category
       const byCategory = {}
       for (const issue of issues) {
         if (!byCategory[issue.category]) byCategory[issue.category] = []
@@ -349,7 +401,36 @@ function formatReport(results, config) {
       }
     }
 
-    // Credential summary
+    // Fix changelog
+    if (result.fixResult && result.fixResult.changelog.length > 0) {
+      lines.push(`\n  \x1b[4mAuto-Fixes Applied\x1b[0m`)
+      for (const fix of result.fixResult.changelog) {
+        lines.push(`    ${ICONS.FIX} ${fix.rule}: ${fix.action}`)
+      }
+    }
+
+    // Post-fix validation
+    if (result.postFixSummary) {
+      const pf = result.postFixSummary
+      lines.push(`\n  \x1b[4mPost-Fix Validation\x1b[0m`)
+      if (pf.errors === 0 && pf.warnings === 0) {
+        lines.push(`    \x1b[32mAll fixable issues resolved.\x1b[0m`)
+      } else {
+        lines.push(`    Remaining: ${pf.errors} errors, ${pf.warnings} warnings (require manual fix)`)
+      }
+    }
+
+    // Deploy result
+    if (result.deployResult) {
+      lines.push(`\n  \x1b[4mDeploy Status\x1b[0m`)
+      if (result.deployResult.success) {
+        lines.push(`    ${ICONS.DEPLOY} ${result.deployResult.message}`)
+      } else {
+        lines.push(`    \x1b[31m[FAILED]\x1b[0m ${result.deployResult.message}`)
+      }
+    }
+
+    // Credentials
     if (result.credentialSummary && result.credentialSummary.length > 0) {
       lines.push(`\n  \x1b[4mCredentials Required\x1b[0m`)
       const seen = new Set()
@@ -367,10 +448,18 @@ function formatReport(results, config) {
   // Final verdict
   const overallVerdict = totalErrors > 0 ? 'FAIL' : totalWarnings > 0 ? 'REVIEW' : 'PASS'
   lines.push('\x1b[1m========================================================\x1b[0m')
+
+  if (config.fix && totalFixed > 0) {
+    lines.push(`\x1b[1m  Auto-Fixed: ${totalFixed} issue(s) across ${results.length} workflow(s)\x1b[0m`)
+  }
+  if (config.deploy && totalDeployed > 0) {
+    lines.push(`\x1b[1m  Deployed: ${totalDeployed}/${results.length} workflow(s)\x1b[0m`)
+  }
+
   lines.push(`\x1b[1m  Overall Verdict: ${ICONS[overallVerdict]}\x1b[0m`)
 
   if (overallVerdict === 'FAIL') {
-    lines.push(`  \x1b[31m${totalErrors} error(s) must be fixed before deployment.\x1b[0m`)
+    lines.push(`  \x1b[31mSome issues require manual intervention.\x1b[0m`)
   } else if (overallVerdict === 'REVIEW') {
     lines.push(`  \x1b[33m${totalWarnings} warning(s) should be reviewed.\x1b[0m`)
   } else {
@@ -381,20 +470,6 @@ function formatReport(results, config) {
   lines.push('')
 
   return lines.join('\n')
-}
-
-// ============================================================================
-// LOGGING (stderr for --json mode, stdout otherwise)
-// ============================================================================
-
-let logToStderr = false
-
-function log(...args) {
-  if (logToStderr) {
-    process.stderr.write(args.join(' ') + '\n')
-  } else {
-    console.log(...args)
-  }
 }
 
 // ============================================================================
@@ -410,7 +485,6 @@ async function main() {
     process.exit(0)
   }
 
-  // Validate inputs
   if (!config.url && !config.file && !config.dir) {
     console.error('Error: Provide --url, --file, or --dir. Use --help for usage.')
     process.exit(1)
@@ -418,6 +492,16 @@ async function main() {
 
   if (config.url && !config.apiKey) {
     console.error('Error: --api-key is required when using --url.')
+    process.exit(1)
+  }
+
+  if (config.deploy && !config.fix) {
+    console.error('Error: --deploy requires --fix.')
+    process.exit(1)
+  }
+
+  if (config.deploy && !config.url) {
+    console.error('Error: --deploy requires --url (need API connection to deploy).')
     process.exit(1)
   }
 
@@ -440,10 +524,76 @@ async function main() {
       process.exit(0)
     }
 
-    log(`\nValidating ${workflows.length} workflow(s)...\n`)
+    const mode = config.deploy ? 'Validating + Fixing + Deploying' : config.fix ? 'Validating + Fixing' : 'Validating'
+    log(`\n${mode} ${workflows.length} workflow(s)...\n`)
 
-    // Validate all workflows
-    const results = workflows.map(wf => validateWorkflow(wf))
+    // Process each workflow
+    const results = []
+
+    for (const wf of workflows) {
+      // Step 1: Validate
+      const validation = validateWorkflow(wf)
+      const result = { ...validation }
+
+      // Step 2: Fix (if requested)
+      if (config.fix) {
+        const fixResult = fixWorkflow(wf, validation)
+        result.fixResult = { changelog: fixResult.changelog }
+
+        // Re-validate the fixed workflow to show remaining issues
+        if (fixResult.changelog.length > 0) {
+          const postFix = validateWorkflow(fixResult.workflow)
+          result.postFixSummary = postFix.summary
+
+          // Save fixed workflow to output dir
+          if (config.outputDir) {
+            const outDir = resolve(config.outputDir)
+            if (!existsSync(outDir)) {
+              mkdirSync(outDir, { recursive: true })
+            }
+            const safeName = (wf.name || 'workflow').replace(/[^a-zA-Z0-9_-]/g, '_')
+            const outPath = join(outDir, `${safeName}_fixed.json`)
+            writeFileSync(outPath, JSON.stringify(fixResult.workflow, null, 2), 'utf-8')
+            log(`  Saved fixed workflow: ${outPath}`)
+          }
+
+          // Step 3: Deploy (if requested)
+          if (config.deploy && wf.id) {
+            if (config.dryRun) {
+              result.deployResult = {
+                success: true,
+                message: `[DRY RUN] Would deploy "${wf.name}" (${wf.id}) with ${fixResult.changelog.length} fixes`,
+              }
+              log(`  [DRY RUN] Would deploy: ${wf.name} (${wf.id})`)
+            } else {
+              const baseUrl = config.url.replace(/\/+$/, '')
+              log(`  Deploying: ${wf.name} (${wf.id})...`)
+              result.deployResult = await deployWorkflow(baseUrl, config.apiKey, fixResult.workflow)
+              if (result.deployResult.success) {
+                log(`  Deployed: ${wf.name}`)
+              } else {
+                log(`  Deploy FAILED: ${wf.name} - ${result.deployResult.message}`)
+              }
+            }
+          } else if (config.deploy && !wf.id) {
+            result.deployResult = {
+              success: false,
+              message: `Cannot deploy "${wf.name}" - no workflow ID (loaded from file?)`,
+            }
+          }
+        } else {
+          result.fixResult = { changelog: [] }
+          if (config.deploy) {
+            result.deployResult = {
+              success: true,
+              message: `No fixes needed for "${wf.name}" - skipped deploy`,
+            }
+          }
+        }
+      }
+
+      results.push(result)
+    }
 
     // Format and output report
     const report = formatReport(results, config)
@@ -460,9 +610,12 @@ async function main() {
       console.log(report)
     }
 
-    // Exit code based on results
-    const hasErrors = results.some(r => r.summary.errors > 0)
-    process.exit(hasErrors ? 1 : 0)
+    // Exit code: 0 if all issues were fixed or no errors, 1 if errors remain
+    const hasRemainingErrors = results.some(r => {
+      if (r.postFixSummary) return r.postFixSummary.errors > 0
+      return r.summary.errors > 0
+    })
+    process.exit(hasRemainingErrors ? 1 : 0)
 
   } catch (err) {
     console.error(`\nFatal error: ${err.message}`)
