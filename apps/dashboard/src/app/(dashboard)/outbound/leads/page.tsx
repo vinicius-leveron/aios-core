@@ -7,16 +7,16 @@ import { useOutboundLeads } from '@/hooks/use-outbound-leads'
 import type { LeadStatus } from '@/lib/supabase-server'
 
 const STATUS_OPTIONS: { value: string | null; label: string }[] = [
-  { value: null, label: 'All' },
-  { value: 'new', label: 'New' },
-  { value: 'enriched', label: 'Enriched' },
-  { value: 'in_cadence', label: 'In Cadence' },
-  { value: 'replied', label: 'Replied' },
-  { value: 'meeting', label: 'Meeting' },
-  { value: 'proposal', label: 'Proposal' },
-  { value: 'won', label: 'Won' },
-  { value: 'lost', label: 'Lost' },
-  { value: 'bounced', label: 'Bounced' },
+  { value: null, label: 'Todos' },
+  { value: 'new', label: 'Novo' },
+  { value: 'enriched', label: 'Enriquecido' },
+  { value: 'in_cadence', label: 'Em Cadencia' },
+  { value: 'replied', label: 'Respondeu' },
+  { value: 'meeting', label: 'Visita' },
+  { value: 'proposal', label: 'Proposta' },
+  { value: 'won', label: 'Fechado' },
+  { value: 'lost', label: 'Perdido' },
+  { value: 'bounced', label: 'Bounce' },
 ]
 
 function formatDate(dateStr: string | null): string {
@@ -57,7 +57,7 @@ export default function LeadsPage() {
           </h1>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
             {total} leads {statusFilter ? `(${statusFilter})` : ''}
-            {searchValue ? ` matching "${searchValue}"` : ''}
+            {searchValue ? ` buscando "${searchValue}"` : ''}
           </p>
         </div>
       </div>
@@ -74,7 +74,7 @@ export default function LeadsPage() {
             type="text"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search leads..."
+            placeholder="Buscar leads..."
             className="w-full rounded-md border py-1.5 pl-8 pr-3 text-xs"
             style={{
               backgroundColor: 'var(--bg-surface)',
@@ -117,15 +117,15 @@ export default function LeadsPage() {
           <thead>
             <tr style={{ borderColor: 'var(--border-subtle)' }}>
               {[
-                { key: 'first_name', label: 'Name' },
-                { key: 'company_name', label: 'Company' },
+                { key: 'first_name', label: 'Nome' },
+                { key: 'company_name', label: 'Imobiliaria' },
                 { key: 'status', label: 'Status' },
                 { key: 'lead_score', label: 'Score' },
-                { key: 'emails_sent', label: 'Sent' },
-                { key: 'emails_opened', label: 'Opened' },
-                { key: 'emails_replied', label: 'Replied' },
-                { key: 'source', label: 'Source' },
-                { key: 'last_contacted_at', label: 'Last Contact' },
+                { key: 'emails_sent', label: 'Enviados' },
+                { key: 'emails_opened', label: 'Abertos' },
+                { key: 'emails_replied', label: 'Respostas' },
+                { key: 'source', label: 'Origem' },
+                { key: 'last_contacted_at', label: 'Ultimo Contato' },
               ].map(col => (
                 <th
                   key={col.key}
@@ -156,7 +156,7 @@ export default function LeadsPage() {
             ) : leads.length === 0 ? (
               <tr>
                 <td colSpan={9} className="px-3 py-8 text-center" style={{ color: 'var(--text-muted)' }}>
-                  No leads found
+                  Nenhum lead encontrado
                 </td>
               </tr>
             ) : (
@@ -210,7 +210,7 @@ export default function LeadsPage() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
           <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            Page {page} of {totalPages}
+            Pagina {page} de {totalPages}
           </span>
           <div className="flex gap-1">
             <button

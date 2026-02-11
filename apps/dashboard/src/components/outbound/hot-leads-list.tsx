@@ -12,10 +12,10 @@ function formatTimeAgo(dateStr: string | null): string {
   if (!dateStr) return '-'
   const diff = Date.now() - new Date(dateStr).getTime()
   const hours = Math.floor(diff / 3600000)
-  if (hours < 1) return 'just now'
-  if (hours < 24) return `${hours}h ago`
+  if (hours < 1) return 'agora'
+  if (hours < 24) return `${hours}h atras`
   const days = Math.floor(hours / 24)
-  return `${days}d ago`
+  return `${days}d atras`
 }
 
 export function HotLeadsList({ leads, className }: HotLeadsListProps) {
@@ -32,14 +32,14 @@ export function HotLeadsList({ leads, className }: HotLeadsListProps) {
           className="text-xs font-medium uppercase tracking-wider"
           style={{ color: 'var(--text-tertiary)' }}
         >
-          Hot Leads
+          Leads Quentes
         </h3>
       </div>
 
       <div className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
         {leads.length === 0 ? (
           <div className="p-4 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-            No hot leads yet
+            Nenhum lead quente ainda
           </div>
         ) : (
           leads.map((lead) => (
@@ -95,7 +95,7 @@ export function HotLeadsList({ leads, className }: HotLeadsListProps) {
               {/* Activity */}
               <div className="flex-shrink-0 text-right">
                 <div className="text-xs tabular-nums" style={{ color: 'var(--text-secondary)' }}>
-                  {lead.emails_opened}/{lead.emails_sent} opened
+                  {lead.emails_opened}/{lead.emails_sent} abertos
                 </div>
                 <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                   {formatTimeAgo(lead.last_replied_at || lead.last_contacted_at)}

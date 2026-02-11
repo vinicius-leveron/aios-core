@@ -17,23 +17,23 @@ export default function DomainsPage() {
       {/* Header */}
       <div>
         <h1 className="text-lg font-light" style={{ color: 'var(--text-primary)' }}>
-          Domain Health
+          Saude dos Dominios
         </h1>
         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          Email sending domain status and warmup progress
+          Status dos dominios de envio de email e progresso de warmup
         </p>
       </div>
 
       {/* Summary */}
       <div className="grid grid-cols-4 gap-4">
-        <SummaryCard label="Total Domains" value={domains.length.toString()} color="var(--text-primary)" />
-        <SummaryCard label="Healthy" value={healthyCt.toString()} color="#4ADE80" />
-        <SummaryCard label="Warning" value={warningCt.toString()} color="#FBBF24" />
+        <SummaryCard label="Total Dominios" value={domains.length.toString()} color="var(--text-primary)" />
+        <SummaryCard label="Saudaveis" value={healthyCt.toString()} color="#4ADE80" />
+        <SummaryCard label="Alerta" value={warningCt.toString()} color="#FBBF24" />
         <SummaryCard
-          label="Daily Capacity"
+          label="Capacidade Diaria"
           value={`${totalSent}/${totalLimit}`}
           color="var(--text-secondary)"
-          subtitle={totalLimit > 0 ? `${Math.round((totalSent / totalLimit) * 100)}% used` : ''}
+          subtitle={totalLimit > 0 ? `${Math.round((totalSent / totalLimit) * 100)}% utilizado` : ''}
         />
       </div>
 
@@ -46,7 +46,7 @@ export default function DomainsPage() {
             color: '#F87171',
           }}
         >
-          {criticalCt} domain{criticalCt > 1 ? 's' : ''} in critical status. Check reputation and bounce rates.
+          {criticalCt} dominio{criticalCt > 1 ? 's' : ''} em status critico. Verifique reputacao e taxas de bounce.
         </div>
       )}
 
@@ -66,7 +66,7 @@ export default function DomainsPage() {
           }}
         >
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            No email domains configured yet
+            Nenhum dominio de email configurado ainda
           </p>
         </div>
       ) : (

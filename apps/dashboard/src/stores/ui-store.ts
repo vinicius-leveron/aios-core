@@ -17,7 +17,7 @@ export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
       sidebarCollapsed: false,
-      activeView: 'kanban',
+      activeView: 'dashboard',
 
       toggleSidebar: () =>
         set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
@@ -29,7 +29,7 @@ export const useUIStore = create<UIState>()(
         set({ activeView: view }),
     }),
     {
-      name: 'aios-ui',
+      name: 'leveron-crm-ui',
     }
   )
 );

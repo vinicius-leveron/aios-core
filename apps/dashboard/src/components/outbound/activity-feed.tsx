@@ -5,13 +5,13 @@ import type { Interaction } from '@/lib/supabase-server'
 import type { LucideIcon } from 'lucide-react'
 
 const TYPE_CONFIG: Record<string, { icon: LucideIcon; color: string; label: string }> = {
-  email_sent: { icon: Mail, color: '#60A5FA', label: 'Email sent' },
-  email_opened: { icon: Mail, color: '#34D399', label: 'Email opened' },
-  email_clicked: { icon: MousePointerClick, color: '#A855F7', label: 'Link clicked' },
-  email_replied: { icon: Reply, color: '#FBBF24', label: 'Reply received' },
-  email_bounced: { icon: AlertTriangle, color: '#F87171', label: 'Email bounced' },
-  score_updated: { icon: TrendingUp, color: '#EC4899', label: 'Score updated' },
-  weekly_report: { icon: FileText, color: 'var(--accent-gold)', label: 'Weekly report' },
+  email_sent: { icon: Mail, color: '#60A5FA', label: 'Email enviado' },
+  email_opened: { icon: Mail, color: '#34D399', label: 'Email aberto' },
+  email_clicked: { icon: MousePointerClick, color: '#A855F7', label: 'Link clicado' },
+  email_replied: { icon: Reply, color: '#FBBF24', label: 'Resposta recebida' },
+  email_bounced: { icon: AlertTriangle, color: '#F87171', label: 'Email bounce' },
+  score_updated: { icon: TrendingUp, color: '#EC4899', label: 'Score atualizado' },
+  weekly_report: { icon: FileText, color: 'var(--accent-gold)', label: 'Relatorio semanal' },
 }
 
 function formatTime(dateStr: string): string {
@@ -20,31 +20,31 @@ function formatTime(dateStr: string): string {
   const diff = now.getTime() - date.getTime()
   const minutes = Math.floor(diff / 60000)
 
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 1) return 'agora'
+  if (minutes < 60) return `${minutes}m atras`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
+  if (hours < 24) return `${hours}h atras`
   const days = Math.floor(hours / 24)
-  return `${days}d ago`
+  return `${days}d atras`
 }
 
 function getDescription(interaction: Interaction): string {
   const meta = interaction.metadata || {}
   switch (interaction.type) {
     case 'email_sent':
-      return interaction.subject || `Step ${meta.step_number || '?'} via ${meta.domain || 'unknown'}`
+      return interaction.subject || `Step ${meta.step_number || '?'} via ${meta.domain || 'desconhecido'}`
     case 'email_opened':
       return interaction.subject || `Step ${meta.step_number || '?'}`
     case 'email_clicked':
       return `${meta.url || 'Link'} (step ${meta.step_number || '?'})`
     case 'email_replied':
-      return (meta.snippet as string) || interaction.subject || 'Reply received'
+      return (meta.snippet as string) || interaction.subject || 'Resposta recebida'
     case 'email_bounced':
-      return `${meta.bounce_type || 'unknown'}: ${meta.reason || ''}`
+      return `${meta.bounce_type || 'desconhecido'}: ${meta.reason || ''}`
     case 'score_updated':
       return `${meta.lead_name || 'Lead'}: ${meta.previous_score} → ${meta.new_score}`
     case 'weekly_report':
-      return `${meta.emails_sent || 0} sent, ${meta.open_rate || 0}% open rate`
+      return `${meta.emails_sent || 0} enviados, ${meta.open_rate || 0}% taxa de abertura`
     default:
       return interaction.subject || interaction.type
   }
@@ -69,14 +69,14 @@ export function ActivityFeed({ activity, className }: ActivityFeedProps) {
           className="text-xs font-medium uppercase tracking-wider"
           style={{ color: 'var(--text-tertiary)' }}
         >
-          Recent Activity
+          Atividade Recente
         </h3>
       </div>
 
       <div className="max-h-[400px] overflow-y-auto scrollbar-refined">
         {activity.length === 0 ? (
           <div className="p-4 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-            No activity yet
+            Nenhuma atividade ainda
           </div>
         ) : (
           activity.map((item) => {

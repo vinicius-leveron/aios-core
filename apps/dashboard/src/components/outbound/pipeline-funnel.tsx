@@ -18,17 +18,17 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  new: 'New',
-  enriched: 'Enriched',
-  in_cadence: 'In Cadence',
-  cadence_complete: 'Done',
-  replied: 'Replied',
-  meeting: 'Meeting',
-  proposal: 'Proposal',
-  won: 'Won',
-  lost: 'Lost',
-  bounced: 'Bounced',
-  unsubscribed: 'Unsub',
+  new: 'Novo',
+  enriched: 'Enriquecido',
+  in_cadence: 'Em Cadencia',
+  cadence_complete: 'Concluido',
+  replied: 'Respondeu',
+  meeting: 'Visita',
+  proposal: 'Proposta',
+  won: 'Fechado',
+  lost: 'Perdido',
+  bounced: 'Bounce',
+  unsubscribed: 'Descadastrado',
 }
 
 interface PipelineFunnelProps {
@@ -52,10 +52,10 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
       <p className="font-medium">{STATUS_LABELS[item.status] || item.status}</p>
       <p style={{ color: 'var(--text-secondary)' }}>{item.total} leads</p>
       {item.replied_7d > 0 && (
-        <p style={{ color: 'var(--status-success)' }}>{item.replied_7d} replied (7d)</p>
+        <p style={{ color: 'var(--status-success)' }}>{item.replied_7d} responderam (7d)</p>
       )}
       {item.avg_score > 0 && (
-        <p style={{ color: 'var(--text-muted)' }}>Avg score: {item.avg_score}</p>
+        <p style={{ color: 'var(--text-muted)' }}>Score medio: {item.avg_score}</p>
       )}
     </div>
   )

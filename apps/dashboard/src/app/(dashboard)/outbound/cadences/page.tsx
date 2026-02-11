@@ -10,10 +10,10 @@ export default function CadencesPage() {
       {/* Header */}
       <div>
         <h1 className="text-lg font-light" style={{ color: 'var(--text-primary)' }}>
-          Cadence Performance
+          Performance de Cadencias
         </h1>
         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          Email sequence performance by cadence
+          Performance das sequencias de email por cadencia
         </p>
       </div>
 
@@ -33,7 +33,7 @@ export default function CadencesPage() {
           }}
         >
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            No cadences configured yet
+            Nenhuma cadencia configurada ainda
           </p>
         </div>
       ) : (
@@ -76,24 +76,24 @@ export default function CadencesPage() {
                   color="var(--text-primary)"
                 />
                 <MetricBlock
-                  label="Contacted"
+                  label="Contatados"
                   value={cadence.leads_contacted.toString()}
                   color="var(--text-secondary)"
                 />
                 <MetricBlock
-                  label="Opened"
+                  label="Abriram"
                   value={cadence.leads_opened.toString()}
                   subvalue={cadence.open_rate > 0 ? `${cadence.open_rate}%` : '-'}
                   color="#34D399"
                 />
                 <MetricBlock
-                  label="Replied"
+                  label="Responderam"
                   value={cadence.leads_replied.toString()}
                   subvalue={cadence.reply_rate > 0 ? `${cadence.reply_rate}%` : '-'}
                   color="#FBBF24"
                 />
                 <MetricBlock
-                  label="Conversion"
+                  label="Conversao"
                   value={cadence.total_leads > 0
                     ? `${((cadence.leads_replied / cadence.total_leads) * 100).toFixed(1)}%`
                     : '0%'}
@@ -112,7 +112,7 @@ export default function CadencesPage() {
                           width: `${(cadence.leads_contacted / cadence.total_leads) * 100}%`,
                           backgroundColor: '#60A5FA',
                         }}
-                        title={`${cadence.leads_contacted} contacted`}
+                        title={`${cadence.leads_contacted} contatados`}
                       />
                       <div
                         className="h-2 transition-luxury"
@@ -120,7 +120,7 @@ export default function CadencesPage() {
                           width: `${(cadence.leads_opened / cadence.total_leads) * 100}%`,
                           backgroundColor: '#34D399',
                         }}
-                        title={`${cadence.leads_opened} opened`}
+                        title={`${cadence.leads_opened} abriram`}
                       />
                       <div
                         className="h-2 transition-luxury"
@@ -128,7 +128,7 @@ export default function CadencesPage() {
                           width: `${(cadence.leads_replied / cadence.total_leads) * 100}%`,
                           backgroundColor: '#FBBF24',
                         }}
-                        title={`${cadence.leads_replied} replied`}
+                        title={`${cadence.leads_replied} responderam`}
                       />
                     </>
                   )}
@@ -136,15 +136,15 @@ export default function CadencesPage() {
                 <div className="mt-1.5 flex gap-4 text-[10px]" style={{ color: 'var(--text-muted)' }}>
                   <span className="flex items-center gap-1">
                     <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#60A5FA' }} />
-                    Contacted
+                    Contatados
                   </span>
                   <span className="flex items-center gap-1">
                     <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#34D399' }} />
-                    Opened
+                    Abriram
                   </span>
                   <span className="flex items-center gap-1">
                     <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#FBBF24' }} />
-                    Replied
+                    Responderam
                   </span>
                 </div>
               </div>

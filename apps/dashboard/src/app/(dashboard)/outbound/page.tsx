@@ -1,6 +1,6 @@
 'use client'
 
-import { Users, Mail, MessageSquare, Target } from 'lucide-react'
+import { Users, Mail, MessageSquare, Building2 } from 'lucide-react'
 import { MetricCard } from '@/components/outbound/metric-card'
 import { PipelineFunnel } from '@/components/outbound/pipeline-funnel'
 import { HotLeadsList } from '@/components/outbound/hot-leads-list'
@@ -11,7 +11,7 @@ import { useOutboundHotLeads } from '@/hooks/use-outbound-hot-leads'
 import { useOutboundActivity } from '@/hooks/use-outbound-activity'
 import { useOutboundDomains } from '@/hooks/use-outbound-domains'
 
-export default function OutboundPage() {
+export default function DashboardPage() {
   const { pipeline, totalLeads, inCadence, replied7d, meetings, isLoading: pipelineLoading } = useOutboundPipeline()
   const { hotLeads, isLoading: hotLeadsLoading } = useOutboundHotLeads()
   const { activity, isLoading: activityLoading } = useOutboundActivity()
@@ -25,16 +25,16 @@ export default function OutboundPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-light" style={{ color: 'var(--text-primary)' }}>
-            Outbound
+            Dashboard
           </h1>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            Leveron &rarr; Escritorios de Advocacia
+            Leveron CRM &rarr; Imobiliarias
           </p>
         </div>
         {isLoading && (
           <div className="flex items-center gap-2">
             <div className="h-2 w-2 animate-pulse rounded-full" style={{ backgroundColor: 'var(--accent-gold)' }} />
-            <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Loading...</span>
+            <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Carregando...</span>
           </div>
         )}
       </div>
@@ -44,26 +44,26 @@ export default function OutboundPage() {
         <MetricCard
           title="Total Leads"
           value={totalLeads}
-          subtitle="in CRM"
+          subtitle="no CRM"
           icon={Users}
         />
         <MetricCard
-          title="In Cadence"
+          title="Em Cadencia"
           value={inCadence}
-          subtitle="active sequences"
+          subtitle="sequencias ativas"
           icon={Mail}
         />
         <MetricCard
-          title="Replied (7d)"
+          title="Responderam (7d)"
           value={replied7d}
-          subtitle="this week"
+          subtitle="esta semana"
           icon={MessageSquare}
         />
         <MetricCard
-          title="Meetings"
+          title="Visitas Agendadas"
           value={meetings}
-          subtitle="booked"
-          icon={Target}
+          subtitle="agendadas"
+          icon={Building2}
         />
       </div>
 
@@ -93,7 +93,7 @@ export default function OutboundPage() {
             className="text-xs font-medium uppercase tracking-wider"
             style={{ color: 'var(--text-tertiary)' }}
           >
-            Domain Health
+            Saude dos Dominios
           </h3>
           {domains.map((domain) => (
             <DomainHealthCard key={domain.domain} domain={domain} />
@@ -107,7 +107,7 @@ export default function OutboundPage() {
                 color: 'var(--text-muted)',
               }}
             >
-              No domains configured
+              Nenhum dominio configurado
             </div>
           )}
         </div>

@@ -1,7 +1,8 @@
 'use client';
 
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useUIStore } from '@/stores/ui-store';
-import { useBobStore } from '@/stores/bob-store';
 import { SIDEBAR_ITEMS } from '@/types';
 import { cn } from '@/lib/utils';
 import { iconMap } from '@/lib/icons';
@@ -11,9 +12,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({ className }: SidebarProps) {
-  const { sidebarCollapsed, activeView, setActiveView } = useUIStore();
-  const bobActive = useBobStore((s) => s.active);
-  const bobInactive = useBobStore((s) => s.isInactive);
+  const { sidebarCollapsed } = useUIStore();
+  const pathname = usePathname();
 
   return (
     <aside
@@ -27,11 +27,11 @@ export function Sidebar({ className }: SidebarProps) {
       {/* Logo/Brand */}
       <div className="flex h-14 items-center border-b px-4" style={{ borderColor: 'var(--border-subtle)' }}>
         {sidebarCollapsed ? (
-          <span className="text-xl font-light" style={{ color: 'var(--accent-gold)' }}>A</span>
+          <span className="text-xl font-light" style={{ color: 'var(--accent-gold)' }}>L</span>
         ) : (
           <div className="flex items-center gap-2">
-            <span className="text-sm font-light tracking-wide" style={{ color: 'var(--accent-gold)' }}>AIOS</span>
-            <span className="text-sm font-light" style={{ color: 'var(--text-tertiary)' }}>Dashboard</span>
+            <span className="text-sm font-light tracking-wide" style={{ color: 'var(--accent-gold)' }}>Leveron</span>
+            <span className="text-sm font-light" style={{ color: 'var(--text-tertiary)' }}>CRM</span>
           </div>
         )}
       </div>
@@ -39,16 +39,20 @@ export function Sidebar({ className }: SidebarProps) {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4 scrollbar-refined">
         <ul className="space-y-0.5 px-2">
-          {SIDEBAR_ITEMS.map((item) => (
-            <SidebarNavItem
-              key={item.id}
-              item={item}
-              isActive={activeView === item.id}
-              isCollapsed={sidebarCollapsed}
-              onClick={() => setActiveView(item.id)}
-              badge={item.id === 'bob' && bobActive ? (bobInactive ? 'inactive' : 'active') : undefined}
-            />
-          ))}
+          {SIDEBAR_ITEMS.map((item) => {
+            const isActive = item.href === '/outbound'
+              ? pathname === '/outbound' || pathname === '/'
+              : pathname.startsWith(item.href);
+
+            return (
+              <SidebarNavItem
+                key={item.id}
+                item={item}
+                isActive={isActive}
+                isCollapsed={sidebarCollapsed}
+              />
+            );
+          })}
         </ul>
       </nav>
     </aside>
@@ -59,18 +63,16 @@ interface SidebarNavItemProps {
   item: typeof SIDEBAR_ITEMS[number];
   isActive: boolean;
   isCollapsed: boolean;
-  onClick: () => void;
-  badge?: 'active' | 'inactive';
 }
 
-function SidebarNavItem({ item, isActive, isCollapsed, onClick, badge }: SidebarNavItemProps) {
+function SidebarNavItem({ item, isActive, isCollapsed }: SidebarNavItemProps) {
   return (
     <li>
-      <button
-        onClick={onClick}
+      <Link
+        href={item.href}
         className={cn(
           'group relative flex w-full items-center gap-3 px-3 py-2 text-sm font-light',
-          'transition-luxury',
+          'transition-luxury rounded-md',
           'focus-visible:outline-none focus-visible:ring-1',
           isCollapsed && 'justify-center px-2'
         )}
@@ -106,25 +108,6 @@ function SidebarNavItem({ item, isActive, isCollapsed, onClick, badge }: Sidebar
         {/* Label (hidden when collapsed) */}
         {!isCollapsed && <span className="flex-1 truncate text-left">{item.label}</span>}
 
-        {/* Badge (e.g., Bob active/inactive) */}
-        {!isCollapsed && badge && (
-          <span
-            className="rounded-full px-1.5 py-0.5 text-[9px] font-medium"
-            style={{
-              backgroundColor: badge === 'active' ? '#22c55e20' : '#6b728020',
-              color: badge === 'active' ? '#22c55e' : '#6b7280',
-            }}
-          >
-            {badge}
-          </span>
-        )}
-        {isCollapsed && badge === 'active' && (
-          <span
-            className="absolute top-1 right-1 h-2 w-2 rounded-full"
-            style={{ backgroundColor: '#22c55e' }}
-          />
-        )}
-
         {/* Keyboard shortcut hint */}
         {!isCollapsed && item.shortcut && (
           <span
@@ -149,7 +132,7 @@ function SidebarNavItem({ item, isActive, isCollapsed, onClick, badge }: Sidebar
             style={{ backgroundColor: 'var(--accent-gold)' }}
           />
         )}
-      </button>
+      </Link>
     </li>
   );
 }
