@@ -70,7 +70,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Prepare interaction record and lead update\nconst event = $input.first().json;\n\nconst interaction = {\n  lead_id: event.lead_id,\n  type: event.event === 'open' ? 'email_opened' : 'email_clicked',\n  channel: 'email',\n  metadata: {\n    email_id: event.email_id,\n    link_url: event.link_url,\n    user_agent: event.user_agent,\n    ip_address: event.ip_address,\n    timestamp: event.timestamp\n  }\n};\n\n// Lead field to increment\nconst leadUpdate = {};\nif (event.event === 'open') {\n  leadUpdate.field = 'emails_opened';\n} else if (event.event === 'click') {\n  leadUpdate.field = 'emails_clicked';\n}\n\nreturn [{\n  json: {\n    lead_id: event.lead_id,\n    interaction: interaction,\n    lead_update_field: leadUpdate.field,\n    event_type: event.event\n  }\n}];"
+        "jsCode": "// Prepare interaction record and lead update\n// Output is FLAT structure for Supabase node compatibility\nconst event = $input.first().json;\n\nreturn [{\n  json: {\n    lead_id: event.lead_id,\n    type: event.event === 'open' ? 'email_opened' : 'email_clicked',\n    channel: 'email',\n    metadata: {\n      email_id: event.email_id,\n      link_url: event.link_url,\n      user_agent: event.user_agent,\n      ip_address: event.ip_address,\n      timestamp: event.timestamp\n    },\n    lead_update_field: event.event === 'open' ? 'emails_opened' : 'emails_clicked',\n    event_type: event.event\n  }\n}];"
       },
       "id": "prepare-records",
       "name": "Prepare Records",
