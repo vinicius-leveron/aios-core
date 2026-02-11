@@ -1,0 +1,204 @@
+name: copy-squad
+version: 1.0.0
+short-title: Copy Squad
+description: >-
+  Elite copywriting squad with specialized agents for sales copy, brand voice,
+  email marketing, social media, SEO, landing pages, and paid advertising.
+  Each agent embodies the frameworks and methodologies of legendary copywriters,
+  organized in a tier system with the Copy Chief as orchestrator.
+author: AIOS Team
+license: MIT
+slashPrefix: copy
+documentation: README.md
+
+aios:
+  minVersion: "2.1.0"
+  type: squad
+
+# Integration settings
+integration:
+  enabled: false
+  log_source: true
+  fallback_behavior: "graceful"
+
+# Agents organized by tier
+agents:
+  # Orchestrator
+  - id: copy-chief
+    name: "Sterling"
+    role: "Orchestrator - routing, coordination, and quality control"
+    tier: orchestrator
+    version: "1.0.0"
+    file: "agents/copy-chief.md"
+
+  # Tier 0 - Foundation & Diagnosis
+  - id: copy-strategist
+    name: "Schwartz"
+    role: "Market awareness diagnosis and copy strategy"
+    tier: 0
+    specialty: "Eugene Schwartz's 5 Levels of Awareness, market sophistication analysis"
+    file: "agents/copy-strategist.md"
+
+  # Tier 1 - Core Execution
+  - id: sales-copy-writer
+    name: "Halbert"
+    role: "Direct response sales copy and long-form sales letters"
+    tier: 1
+    results: "Masters frameworks from Gary Halbert, Gary Bencivenga, John Carlton"
+    specialty: "Sales letters, VSLs, direct response"
+    file: "agents/sales-copy-writer.md"
+
+  - id: brand-voice-architect
+    name: "Ogilvy"
+    role: "Brand voice, tone of voice, and positioning"
+    tier: 1
+    results: "David Ogilvy's brand-building methodology"
+    specialty: "Brand voice guides, positioning statements, brand storytelling"
+    file: "agents/brand-voice-architect.md"
+
+  # Tier 2 - Systematizers
+  - id: email-copy-specialist
+    name: "Kennedy"
+    role: "Email marketing sequences and automation copy"
+    tier: 2
+    specialty: "Dan Kennedy's direct marketing systems, email sequences, nurture flows"
+    file: "agents/email-copy-specialist.md"
+
+  - id: seo-copy-specialist
+    name: "Clarity"
+    role: "SEO-optimized content and search-driven copy"
+    tier: 2
+    specialty: "Search intent mapping, content optimization, keyword-driven copy"
+    file: "agents/seo-copy-specialist.md"
+
+  # Tier 3 - Format Specialists
+  - id: social-copy-specialist
+    name: "Vayner"
+    role: "Social media copy across all platforms"
+    tier: 3
+    specialty: "Platform-native copy, hooks, viral mechanics, engagement patterns"
+    file: "agents/social-copy-specialist.md"
+
+  - id: landing-page-specialist
+    name: "Breeze"
+    role: "Landing page copy and conversion optimization"
+    tier: 3
+    specialty: "Above-the-fold copy, CTA optimization, page flow, conversion"
+    file: "agents/landing-page-specialist.md"
+
+  - id: ad-copy-specialist
+    name: "Caples"
+    role: "Paid media ad copy across all channels"
+    tier: 3
+    specialty: "Headlines, ad creative copy, Meta ads, Google Ads, YouTube pre-rolls"
+    file: "agents/ad-copy-specialist.md"
+
+# Tasks registry
+tasks:
+  - id: write-sales-page
+    name: "Write Sales Page"
+    category: "creation"
+  - id: create-email-sequence
+    name: "Create Email Sequence"
+    category: "creation"
+  - id: create-brand-voice-guide
+    name: "Create Brand Voice Guide"
+    category: "strategy"
+  - id: write-landing-page
+    name: "Write Landing Page"
+    category: "creation"
+  - id: write-ad-copy
+    name: "Write Ad Copy"
+    category: "creation"
+  - id: write-social-posts
+    name: "Write Social Media Posts"
+    category: "creation"
+  - id: optimize-seo-content
+    name: "Optimize SEO Content"
+    category: "optimization"
+  - id: diagnose-market-awareness
+    name: "Diagnose Market Awareness"
+    category: "diagnosis"
+  - id: copy-audit
+    name: "Copy Audit"
+    category: "validation"
+
+# Templates registry
+templates:
+  - id: sales-page-template
+    name: "Sales Page Template"
+    category: "creation"
+  - id: email-sequence-template
+    name: "Email Sequence Template"
+    category: "creation"
+  - id: brand-voice-guide-template
+    name: "Brand Voice Guide Template"
+    category: "strategy"
+  - id: ad-copy-brief-template
+    name: "Ad Copy Brief Template"
+    category: "creation"
+
+# Checklists registry
+checklists:
+  - id: copy-quality-checklist
+    name: "Copy Quality Checklist"
+    usage: "Validate any copy output against proven principles"
+  - id: sales-page-checklist
+    name: "Sales Page Checklist"
+    usage: "Validate sales page completeness and conversion elements"
+  - id: email-deliverability-checklist
+    name: "Email Deliverability Checklist"
+    usage: "Ensure emails pass spam filters and reach inbox"
+
+# Workflow states
+workflow:
+  states:
+    - name: DIAGNOSE
+      description: "Market awareness and sophistication analysis"
+      next: STRATEGIZE
+    - name: STRATEGIZE
+      description: "Copy angle and approach selection"
+      next: CREATE
+    - name: CREATE
+      description: "Draft copy using appropriate frameworks"
+      next: REVIEW
+    - name: REVIEW
+      description: "Quality audit against proven principles"
+      next: OPTIMIZE
+    - name: OPTIMIZE
+      description: "Refine, test, and polish"
+      next: DELIVER
+    - name: DELIVER
+      description: "Final copy ready for deployment"
+
+# Pattern Library
+pattern_library:
+  prefix: CP
+  naming_convention:
+    format: "{PREFIX}-{CATEGORY}-{NUMBER}"
+    example: "CP-TP-001"
+  categories:
+    - id: TP
+      name: "Task Patterns"
+      description: "Patterns for copywriting task structure"
+    - id: EP
+      name: "Executor Patterns"
+      description: "Patterns for copywriter selection"
+    - id: PP
+      name: "Process Patterns"
+      description: "Patterns for copy workflow processes"
+    - id: FP
+      name: "Framework Patterns"
+      description: "Patterns for copywriting frameworks"
+
+tags:
+  - copywriting
+  - sales-copy
+  - email-marketing
+  - brand-voice
+  - seo-copy
+  - landing-pages
+  - ad-copy
+  - social-media
+  - direct-response
+  - conversion

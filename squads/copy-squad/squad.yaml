@@ -1,0 +1,68 @@
+name: copy-squad
+version: 1.0.0
+description: |
+  Elite Copywriting Squad - Specialized agents for every dimension of
+  persuasive writing. From market diagnosis to final delivery, each agent
+  embodies the frameworks of legendary copywriters organized in a tier system.
+author: AIOS Team
+license: MIT
+slashPrefix: copy
+documentation: README.md
+
+aios:
+  minVersion: "2.1.0"
+  type: squad
+
+components:
+  agents:
+    # Orchestrator
+    - copy-chief.md
+    # Tier 0 - Diagnosis
+    - copy-strategist.md
+    # Tier 1 - Core Execution
+    - sales-copy-writer.md
+    - brand-voice-architect.md
+    # Tier 2 - Systematizers
+    - email-copy-specialist.md
+    - seo-copy-specialist.md
+    # Tier 3 - Format Specialists
+    - social-copy-specialist.md
+    - landing-page-specialist.md
+    - ad-copy-specialist.md
+  tasks:
+    - write-sales-page.md
+    - create-email-sequence.md
+    - create-brand-voice-guide.md
+    - write-landing-page.md
+    - write-ad-copy.md
+    - write-social-posts.md
+    - optimize-seo-content.md
+    - diagnose-market-awareness.md
+    - copy-audit.md
+  templates:
+    - sales-page-template.md
+    - email-sequence-template.md
+    - brand-voice-guide-template.md
+    - ad-copy-brief-template.md
+  checklists:
+    - copy-quality-checklist.md
+    - sales-page-checklist.md
+    - email-deliverability-checklist.md
+  data:
+    - copy-kb.md
+
+dependencies:
+  node: []
+  python: []
+  squads: []
+
+tags:
+  - copywriting
+  - sales
+  - email
+  - brand
+  - seo
+  - landing-pages
+  - ads
+  - social-media
+  - direct-response
