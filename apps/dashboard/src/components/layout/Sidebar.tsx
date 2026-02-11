@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useUIStore } from '@/stores/ui-store';
 import { useBobStore } from '@/stores/bob-store';
 import { SIDEBAR_ITEMS } from '@/types';
@@ -11,9 +12,17 @@ interface SidebarProps {
 }
 
 export function Sidebar({ className }: SidebarProps) {
+  const router = useRouter();
   const { sidebarCollapsed, activeView, setActiveView } = useUIStore();
   const bobActive = useBobStore((s) => s.active);
   const bobInactive = useBobStore((s) => s.isInactive);
+
+  const handleItemClick = (item: typeof SIDEBAR_ITEMS[number]) => {
+    setActiveView(item.id);
+    if (item.href) {
+      router.push(item.href);
+    }
+  };
 
   return (
     <aside
@@ -45,7 +54,7 @@ export function Sidebar({ className }: SidebarProps) {
               item={item}
               isActive={activeView === item.id}
               isCollapsed={sidebarCollapsed}
-              onClick={() => setActiveView(item.id)}
+              onClick={() => handleItemClick(item)}
               badge={item.id === 'bob' && bobActive ? (bobInactive ? 'inactive' : 'active') : undefined}
             />
           ))}
