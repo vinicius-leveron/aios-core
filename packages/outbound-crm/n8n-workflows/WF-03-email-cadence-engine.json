@@ -222,11 +222,9 @@
   "connections": {
     "Daily 9AM BRT (Weekdays)": { "main": [[{ "node": "Weekend Check", "type": "main", "index": 0 }]] },
     "Manual Trigger": { "main": [[{ "node": "Weekend Check", "type": "main", "index": 0 }]] },
-    "Weekend Check": { "main": [[{ "node": "Fetch Active Leads", "type": "main", "index": 0 }]] },
+    "Weekend Check": { "main": [[{ "node": "Fetch Active Leads", "type": "main", "index": 0 }, { "node": "Fetch Active Domains", "type": "main", "index": 0 }, { "node": "Fetch Templates", "type": "main", "index": 0 }]] },
     "Fetch Active Leads": { "main": [[{ "node": "Calculate Send Schedule", "type": "main", "index": 0 }]] },
     "Calculate Send Schedule": { "main": [[{ "node": "Prepare Emails", "type": "main", "index": 0 }]] },
-    "Fetch Active Domains": { "main": [[{ "node": "Prepare Emails", "type": "main", "index": 0 }]] },
-    "Fetch Templates": { "main": [[{ "node": "Prepare Emails", "type": "main", "index": 0 }]] },
     "Prepare Emails": { "main": [[{ "node": "Send via Resend API", "type": "main", "index": 0 }]] },
     "Send via Resend API": { "main": [[{ "node": "Human-like Delay (2-5s)", "type": "main", "index": 0 }]] },
     "Human-like Delay (2-5s)": { "main": [[{ "node": "Post-Send Updates", "type": "main", "index": 0 }]] },

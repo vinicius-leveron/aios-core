@@ -99,20 +99,22 @@
     },
     {
       "parameters": {
-        "method": "PATCH",
-        "url": "CONFIGURE_SUPABASE_URL/rest/v1/leads?id=eq.{{ $json.lead_id }}",
+        "method": "POST",
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/rpc/increment_lead_counter",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" },
             { "name": "Content-Type", "value": "application/json" },
             { "name": "Prefer", "value": "return=minimal" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"{{ $json.lead_update_field }}\": \"{{ $json.lead_update_field }}\"\n}",
+        "jsonBody": "={\n  \"p_lead_id\": \"{{ $json.lead_id }}\",\n  \"p_field\": \"{{ $json.lead_update_field }}\"\n}",
         "options": { "timeout": 10000 }
       },
       "id": "increment-lead-counter",
@@ -121,7 +123,7 @@
       "position": [1750, 550],
       "typeVersion": 4.2,
       "continueOnFail": true,
-      "notes": "CONFIGURE: Use Supabase RPC to atomically increment emails_opened or emails_clicked"
+      "notes": "Calls Supabase RPC function increment_lead_counter(p_lead_id, p_field) for atomic increment"
     },
     {
       "parameters": {

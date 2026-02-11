@@ -1,0 +1,197 @@
+{
+  "name": "WF-16 LinkedIn Profile Enrichment",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 6 }]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/leads?linkedin_url=is.null&email=not.is.null&status=in.(new,enriched)&select=id,first_name,last_name,company_name,email,role&limit=20&order=lead_score.desc",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-unenriched",
+      "name": "Fetch Leads Without LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "has-leads",
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-leads",
+      "name": "Any Leads to Enrich?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "={{ $json }}",
+        "options": {}
+      },
+      "id": "split-leads",
+      "name": "Split Leads",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// LinkedIn enrichment strategies:\n//\n// Option A: Proxycurl API (paid, reliable)\n//   POST https://nubela.co/proxycurl/api/linkedin/profile/resolve\n//   { \"first_name\": \"...\", \"last_name\": \"...\", \"company_name\": \"...\" }\n//\n// Option B: Phantombuster (paid, automation)\n//   Uses a phantom to search LinkedIn and return profile URLs\n//\n// Option C: Google Search API (free-ish)\n//   site:linkedin.com/in \"First Last\" \"Company\"\n//\n// Option D: RocketReach / Apollo.io API (paid)\n//\n// We'll use Google Custom Search as the free default,\n// with Proxycurl as the premium option.\n\nconst lead = $input.first().json;\nconst provider = 'CONFIGURE_LINKEDIN_PROVIDER'; // google, proxycurl, phantombuster\n\nlet searchUrl, searchBody, searchHeaders;\n\nif (provider === 'proxycurl') {\n  searchUrl = 'https://nubela.co/proxycurl/api/linkedin/profile/resolve';\n  searchBody = null;\n  searchHeaders = {\n    'Authorization': 'Bearer CONFIGURE_PROXYCURL_API_KEY'\n  };\n  // Will be GET with params\n} else {\n  // Google Custom Search\n  const query = `site:linkedin.com/in \"${lead.first_name} ${lead.last_name}\" \"${lead.company_name || ''}\"`;\n  searchUrl = `https://www.googleapis.com/customsearch/v1?key=CONFIGURE_GOOGLE_API_KEY&cx=CONFIGURE_GOOGLE_CX&q=${encodeURIComponent(query)}&num=3`;\n  searchHeaders = {};\n}\n\nreturn [{\n  json: {\n    lead_id: lead.id,\n    lead_name: `${lead.first_name} ${lead.last_name}`,\n    lead_company: lead.company_name,\n    lead_email: lead.email,\n    provider,\n    searchUrl,\n    searchHeaders,\n    proxycurl_params: provider === 'proxycurl' ? {\n      first_name: lead.first_name,\n      last_name: lead.last_name,\n      company_name: lead.company_name || undefined,\n      similarity_checks: 'include',\n      enrich_profile: 'skip'\n    } : null\n  }\n}];"
+      },
+      "id": "build-search",
+      "name": "Build LinkedIn Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.searchUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ $json.searchHeaders.Authorization || '' }}" }
+          ]
+        },
+        "options": {
+          "response": { "response": { "fullResponse": true } },
+          "timeout": 15000,
+          "allowUnauthorizedCerts": false
+        }
+      },
+      "id": "search-linkedin",
+      "name": "Search LinkedIn Profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract LinkedIn URL from search results\nconst response = $input.first().json;\nconst leadData = $('Build LinkedIn Search').first().json;\n\nlet linkedinUrl = null;\nlet profileData = {};\n\nif (leadData.provider === 'proxycurl') {\n  // Proxycurl returns direct profile URL\n  linkedinUrl = response.body?.url || response.url || null;\n  profileData = {\n    headline: response.body?.headline || null,\n    summary: response.body?.summary || null,\n    location: response.body?.city || null,\n    connections: response.body?.connections || null\n  };\n} else {\n  // Google Custom Search results\n  const items = response.body?.items || [];\n  for (const item of items) {\n    const url = item.link || '';\n    if (url.includes('linkedin.com/in/')) {\n      // Verify it's likely the right person\n      const title = (item.title || '').toLowerCase();\n      const leadName = leadData.lead_name.toLowerCase();\n      const nameParts = leadName.split(' ');\n      \n      if (nameParts.some(part => title.includes(part))) {\n        linkedinUrl = url;\n        profileData = {\n          title: item.title,\n          snippet: item.snippet\n        };\n        break;\n      }\n    }\n  }\n}\n\nreturn [{\n  json: {\n    lead_id: leadData.lead_id,\n    linkedin_url: linkedinUrl,\n    profile_data: profileData,\n    found: !!linkedinUrl\n  }\n}];"
+      },
+      "id": "extract-url",
+      "name": "Extract LinkedIn URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "found-linkedin",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-found",
+      "name": "LinkedIn Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=CONFIGURE_SUPABASE_URL/rest/v1/leads?id=eq.{{ $json.lead_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"linkedin_url\": \"{{ $json.linkedin_url }}\",\n  \"custom_fields\": {{ JSON.stringify(Object.assign({}, { linkedin_enriched_at: new Date().toISOString(), linkedin_profile: $json.profile_data })) }}\n}",
+        "options": {}
+      },
+      "id": "update-lead",
+      "name": "Update Lead with LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2020, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Add delay between requests to avoid rate limiting\n// LinkedIn/Google are aggressive with rate limits\nawait new Promise(resolve => setTimeout(resolve, 3000 + Math.random() * 2000));\nreturn $input.all();"
+      },
+      "id": "rate-limit",
+      "name": "Rate Limit Delay",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2020, 300]
+    }
+  ],
+  "connections": {
+    "Every 6 Hours": { "main": [[{ "node": "Fetch Leads Without LinkedIn", "type": "main", "index": 0 }]] },
+    "Fetch Leads Without LinkedIn": { "main": [[{ "node": "Any Leads to Enrich?", "type": "main", "index": 0 }]] },
+    "Any Leads to Enrich?": {
+      "main": [
+        [{ "node": "Split Leads", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Split Leads": { "main": [[{ "node": "Build LinkedIn Search", "type": "main", "index": 0 }]] },
+    "Build LinkedIn Search": { "main": [[{ "node": "Search LinkedIn Profile", "type": "main", "index": 0 }]] },
+    "Search LinkedIn Profile": { "main": [[{ "node": "Extract LinkedIn URL", "type": "main", "index": 0 }]] },
+    "Extract LinkedIn URL": { "main": [[{ "node": "LinkedIn Found?", "type": "main", "index": 0 }]] },
+    "LinkedIn Found?": {
+      "main": [
+        [{ "node": "Update Lead with LinkedIn", "type": "main", "index": 0 }],
+        [{ "node": "Rate Limit Delay", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update Lead with LinkedIn": { "main": [[{ "node": "Rate Limit Delay", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 1800
+  },
+  "tags": [
+    { "name": "outbound" },
+    { "name": "enrichment" },
+    { "name": "linkedin" }
+  ]
+}

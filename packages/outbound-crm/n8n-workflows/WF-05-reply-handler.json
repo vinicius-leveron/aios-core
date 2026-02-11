@@ -49,6 +49,12 @@
       "type": "n8n-nodes-base.supabase",
       "position": [1000, 150],
       "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      },
       "notes": "Log auto-reply but don't pause cadence"
     },
     {

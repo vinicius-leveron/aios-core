@@ -1,0 +1,165 @@
+{
+  "name": "WF-14 OAB Seccional Scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "weeks", "weeksInterval": 1, "triggerAtDay": [1], "triggerAtHour": 6 }]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Weekly Monday 6AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "oab-scrape",
+        "responseMode": "onReceived",
+        "responseData": "allEntries"
+      },
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// OAB Seccional URLs por estado\n// Cada seccional tem um diretório público de advogados/escritórios\nconst seccionais = [\n  { state: 'SP', name: 'OAB-SP', url: 'https://www.oabsp.org.br/servicos/advogados', searchUrl: 'https://www.oabsp.org.br/servicos/advogados?SearchableText=escritorio&b_start:int={offset}', resultsPerPage: 20, estimatedTotal: 15000 },\n  { state: 'RJ', name: 'OAB-RJ', url: 'https://www.oabrj.org.br/advogados', searchUrl: 'https://www2.oabrj.org.br/scripts/consulta_adv.asp?tipo=nome&nome=&pagina={page}', resultsPerPage: 30, estimatedTotal: 8000 },\n  { state: 'MG', name: 'OAB-MG', url: 'https://www.oabmg.org.br/advogado', searchUrl: 'https://www.oabmg.org.br/advogado/busca?page={page}', resultsPerPage: 20, estimatedTotal: 6000 },\n  { state: 'PR', name: 'OAB-PR', url: 'https://www.oabpr.org.br/', searchUrl: 'https://www.oabpr.org.br/servicos-ao-advogado/consulta-de-advogados/?page={page}', resultsPerPage: 20, estimatedTotal: 4000 },\n  { state: 'RS', name: 'OAB-RS', url: 'https://www.oabrs.org.br/', searchUrl: 'https://www.oabrs.org.br/advogados?page={page}', resultsPerPage: 20, estimatedTotal: 4000 },\n];\n\n// Configuração da execução\nconst targetStates = $input.first().json.states || ['SP']; // Default: começa por SP\nconst maxPagesPerRun = $input.first().json.max_pages || 50; // Limita pra não sobrecarregar\n\nconst targets = seccionais\n  .filter(s => targetStates.includes(s.state))\n  .map(s => ({\n    ...s,\n    pages: Array.from({ length: maxPagesPerRun }, (_, i) => i + 1)\n  }));\n\nreturn targets.map(t => ({ json: t }));"
+      },
+      "id": "config-seccionais",
+      "name": "Configure Seccionais",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 400]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": { "reset": false }
+      },
+      "id": "loop-states",
+      "name": "Loop States",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [700, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.searchUrl.replace('{page}', $json.currentPage || 1).replace('{offset}', (($json.currentPage || 1) - 1) * $json.resultsPerPage) }}",
+        "options": {
+          "response": { "response": { "fullResponse": true } },
+          "timeout": 30000
+        }
+      },
+      "id": "fetch-page",
+      "name": "Fetch OAB Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [920, 400]
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * 3) + 2 }}",
+        "unit": "seconds"
+      },
+      "id": "rate-limit",
+      "name": "Rate Limit Delay",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1030, 400],
+      "notes": "2-5 second delay between page fetches to respect OAB servers"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse HTML response to extract lawyer/firm data\n// This is a generic parser - needs adaptation per seccional\nconst html = $input.first().json.body || '';\nconst state = $input.first().json.state || 'SP';\n\n// Generic extraction patterns for OAB directories\n// These need to be customized per seccional website structure\nconst results = [];\n\n// Pattern 1: Look for structured data (name + OAB number + city)\nconst namePattern = /(?:nome|advogado)[^>]*>([^<]+)</gi;\nconst oabPattern = /(?:oab|inscri)[^>]*>([^<]*\\d+[^<]*)</gi;\nconst cityPattern = /(?:cidade|comarca|local)[^>]*>([^<]+)</gi;\n\n// Try to extract table rows or list items with lawyer info\nconst rowPattern = /<tr[^>]*>([\\s\\S]*?)<\\/tr>/gi;\nlet match;\n\nwhile ((match = rowPattern.exec(html)) !== null) {\n  const row = match[1];\n  const cells = row.match(/<td[^>]*>([\\s\\S]*?)<\\/td>/gi) || [];\n  \n  if (cells.length >= 2) {\n    const cleanText = (html) => html.replace(/<[^>]+>/g, '').trim();\n    const name = cleanText(cells[0] || '');\n    const oabNumber = cleanText(cells[1] || '');\n    const city = cells[2] ? cleanText(cells[2]) : '';\n    const specialty = cells[3] ? cleanText(cells[3]) : '';\n    \n    if (name && name.length > 3 && !name.includes('Nome')) {\n      results.push({\n        full_name: name,\n        oab_number: oabNumber,\n        oab_state: state,\n        city: city,\n        specialty: specialty,\n        source: `oab_${state.toLowerCase()}`,\n        raw_url: $input.first().json.url\n      });\n    }\n  }\n}\n\n// Fallback: try div-based layouts\nif (results.length === 0) {\n  const divPattern = /<div[^>]*class=\"[^\"]*(?:advogado|resultado|item)[^\"]*\"[^>]*>([\\s\\S]*?)<\\/div>/gi;\n  while ((match = divPattern.exec(html)) !== null) {\n    const block = match[1];\n    const nameMatch = block.match(/(?:nome|title)[^>]*>([^<]+)/i) || block.match(/<(?:h[2-4]|strong|b)[^>]*>([^<]+)/i);\n    if (nameMatch) {\n      results.push({\n        full_name: nameMatch[1].trim(),\n        oab_state: state,\n        source: `oab_${state.toLowerCase()}`,\n        raw_html_snippet: block.substring(0, 200)\n      });\n    }\n  }\n}\n\nconsole.log(`Extracted ${results.length} records from ${state} page`);\nreturn results.map(r => ({ json: r }));"
+      },
+      "id": "parse-html",
+      "name": "Parse OAB HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transform OAB records into CRM lead format\nconst items = $input.all();\nconst leads = items.map(item => {\n  const data = item.json;\n  \n  // Split full name into first/last\n  const nameParts = (data.full_name || '').split(' ');\n  const firstName = nameParts[0] || '';\n  const lastName = nameParts.slice(1).join(' ') || '';\n  \n  // Try to extract company from name patterns\n  // E.g., \"Silva & Associados\" or \"Escritório Mendes\"\n  let companyName = null;\n  if (data.full_name && (data.full_name.includes('&') || data.full_name.includes('Escritório') || data.full_name.includes('Associados'))) {\n    companyName = data.full_name;\n  }\n  \n  return {\n    json: {\n      first_name: firstName,\n      last_name: lastName,\n      company_name: companyName,\n      source: data.source,\n      status: 'new',\n      industry: 'legal',\n      role: 'Advogado',\n      tags: ['oab-scrape', data.oab_state || 'unknown'].filter(Boolean),\n      custom_fields: {\n        oab_number: data.oab_number || null,\n        oab_state: data.oab_state || null,\n        city: data.city || null,\n        specialty: data.specialty || null,\n        scraped_at: new Date().toISOString()\n      }\n    }\n  };\n}).filter(l => l.json.first_name.length > 1);\n\nreturn leads;"
+      },
+      "id": "transform-leads",
+      "name": "Transform to Lead Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1360, 400]
+    },
+    {
+      "parameters": {
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/leads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal,resolution=merge-duplicates" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($input.all().map(i => i.json)) }}",
+        "options": {}
+      },
+      "id": "upsert-leads",
+      "name": "Upsert Leads to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1580, 400]
+    },
+    {
+      "parameters": {
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/interactions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"lead_ingestion\",\n  \"channel\": \"scraper\",\n  \"subject\": \"OAB Scrape Complete\",\n  \"metadata\": {\n    \"source\": \"oab_scraper\",\n    \"state\": \"{{ $('Configure Seccionais').item.json.state }}\",\n    \"leads_found\": {{ $input.all().length }},\n    \"scraped_at\": \"{{ new Date().toISOString() }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "log-scrape",
+      "name": "Log Scrape Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1800, 400]
+    }
+  ],
+  "connections": {
+    "Weekly Monday 6AM": { "main": [[{ "node": "Configure Seccionais", "type": "main", "index": 0 }]] },
+    "Manual Trigger": { "main": [[{ "node": "Configure Seccionais", "type": "main", "index": 0 }]] },
+    "Configure Seccionais": { "main": [[{ "node": "Loop States", "type": "main", "index": 0 }]] },
+    "Loop States": { "main": [[{ "node": "Fetch OAB Page", "type": "main", "index": 0 }]] },
+    "Fetch OAB Page": { "main": [[{ "node": "Rate Limit Delay", "type": "main", "index": 0 }]] },
+    "Rate Limit Delay": { "main": [[{ "node": "Parse OAB HTML", "type": "main", "index": 0 }]] },
+    "Parse OAB HTML": { "main": [[{ "node": "Transform to Lead Format", "type": "main", "index": 0 }]] },
+    "Transform to Lead Format": { "main": [[{ "node": "Upsert Leads to Supabase", "type": "main", "index": 0 }]] },
+    "Upsert Leads to Supabase": { "main": [[{ "node": "Log Scrape Result", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 3600
+  },
+  "tags": [
+    { "name": "outbound" },
+    { "name": "ingestion" },
+    { "name": "scraper" }
+  ]
+}

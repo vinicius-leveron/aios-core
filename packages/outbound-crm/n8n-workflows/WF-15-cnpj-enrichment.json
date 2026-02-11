@@ -1,0 +1,162 @@
+{
+  "name": "WF-15 CNPJ/Receita Federal Enrichment",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "weeks", "weeksInterval": 2, "triggerAtDay": [3], "triggerAtHour": 7 }]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Bi-Weekly Wed 7AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cnpj-enrich",
+        "responseMode": "onReceived",
+        "responseData": "allEntries"
+      },
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Configuração de busca CNPJ\n// CNAE 6911-7/01 = Serviços advocatícios\n// APIs públicas: BrasilAPI, ReceitaWS, CNPJ.ws\n\nconst config = {\n  cnae: '6911701',\n  targetStates: $input.first().json.states || ['SP'],\n  apiProvider: 'brasilapi', // brasilapi, receitaws, cnpjws\n  batchSize: 50,\n  // Filtros de porte\n  porteFilter: ['03', '05'], // 03=Pequena, 05=Media\n  // 01=Micro, 03=Pequena, 05=Media, 09=Grande\n};\n\nreturn [{ json: config }];"
+      },
+      "id": "config",
+      "name": "Configure CNPJ Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 400]
+    },
+    {
+      "parameters": {
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/leads?source=eq.cnpj_receita&select=custom_fields->>cnpj&limit=10000",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-existing",
+      "name": "Fetch Existing CNPJs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [700, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Query BrasilAPI for CNAE-based company search\n// BrasilAPI: https://brasilapi.com.br/api/cnpj/v1/{cnpj}\n// For bulk search, use casadosdados.com.br or similar\n//\n// Strategy:\n// 1. Use public CNPJ search APIs that support CNAE filtering\n// 2. Filter by state, porte, and active status\n// 3. Deduplicate against existing leads\n\nconst existingCnpjs = new Set(\n  ($input.first().json || []).map(r => r.cnpj).filter(Boolean)\n);\n\n// Casa dos Dados API (free, public CNPJ search)\n// Allows CNAE + state + porte filtering\nconst searchUrl = 'https://api.casadosdados.com.br/v2/cnpj';\nconst config = $('Configure CNPJ Search').first().json;\n\nreturn [{\n  json: {\n    searchUrl,\n    config,\n    existingCount: existingCnpjs.size,\n    query: {\n      'query': {\n        'termo': [],\n        'atividade_principal': [config.cnae],\n        'natureza_juridica': [],\n        'uf': config.targetStates,\n        'municipio': [],\n        'bairro': [],\n        'situacao_cadastral': 'ATIVA',\n        'cep': [],\n        'ddd': []\n      },\n      'range_query': {\n        'data_abertura': { 'lte': null, 'gte': null },\n        'capital_social': { 'lte': null, 'gte': 50000 }\n      },\n      'extras': {\n        'somente_mei': false,\n        'excluir_mei': true,\n        'com_email': true,\n        'incluir_atividade_secundaria': false,\n        'com_contato_telefonico': false,\n        'somente_fixo': false,\n        'somente_celular': false,\n        'somente_matriz': true\n      },\n      'page': 1\n    }\n  }\n}];"
+      },
+      "id": "build-query",
+      "name": "Build CNPJ Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.searchUrl }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.query) }}",
+        "options": {
+          "response": { "response": { "fullResponse": true } },
+          "timeout": 30000
+        }
+      },
+      "id": "search-cnpj",
+      "name": "Search CNPJ Database",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1140, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transform CNPJ results into lead format\n// Dedup: filter out already-ingested CNPJs\nconst response = $input.first().json;\nconst existingCnpjs = new Set(\n  ($('Fetch Existing CNPJs').first().json || []).map(r => r.cnpj).filter(Boolean)\n);\nconst allCompanies = response.body?.cnpj || response.data || [];\nconst companies = allCompanies.filter(c => {\n  const cnpj = c.cnpj || c.cnpj_basico || '';\n  return cnpj && !existingCnpjs.has(cnpj);\n});\nconsole.log(`Dedup: ${allCompanies.length} total, ${companies.length} new (${allCompanies.length - companies.length} skipped)`);\n\nconst leads = companies.map(company => {\n  // Extract primary partner/owner name\n  const socios = company.qsa || company.socios || [];\n  const mainSocio = socios.find(s => \n    s.qual_socio === 'Sócio-Administrador' || \n    s.qualificacao_socio?.includes('Administrador') ||\n    s.qualificacao_socio?.includes('Diretor')\n  ) || socios[0] || {};\n\n  const socioName = mainSocio.nome_socio || mainSocio.nome || '';\n  const nameParts = socioName.split(' ');\n\n  return {\n    json: {\n      first_name: nameParts[0] || company.razao_social?.split(' ')[0] || 'N/A',\n      last_name: nameParts.slice(1).join(' ') || '',\n      email: company.email || null,\n      phone: company.ddd_telefone_1 ? `${company.ddd_telefone_1}` : null,\n      company_name: company.razao_social || company.nome_fantasia || null,\n      company_website: null,\n      company_size: mapPorte(company.porte || company.descricao_porte),\n      industry: 'legal',\n      role: mainSocio.qualificacao_socio || 'Socio',\n      source: 'cnpj_receita',\n      status: 'new',\n      tags: ['cnpj-enrichment', company.uf || 'unknown'],\n      custom_fields: {\n        cnpj: company.cnpj || company.cnpj_basico || null,\n        razao_social: company.razao_social || null,\n        nome_fantasia: company.nome_fantasia || null,\n        uf: company.uf || null,\n        municipio: company.municipio || null,\n        capital_social: company.capital_social || null,\n        data_abertura: company.data_inicio_atividade || company.data_abertura || null,\n        cnae_principal: company.cnae_fiscal || null,\n        porte: company.porte || company.descricao_porte || null,\n        num_socios: socios.length,\n        scraped_at: new Date().toISOString()\n      }\n    }\n  };\n}).filter(l => l.json.first_name !== 'N/A');\n\nfunction mapPorte(porte) {\n  if (!porte) return null;\n  const p = porte.toLowerCase();\n  if (p.includes('micro')) return 'micro';\n  if (p.includes('pequen')) return 'small';\n  if (p.includes('medi') || p.includes('médio')) return 'medium';\n  if (p.includes('grand')) return 'large';\n  return null;\n}\n\nconsole.log(`Transformed ${leads.length} CNPJ records into leads`);\nreturn leads;"
+      },
+      "id": "transform-cnpj",
+      "name": "Transform CNPJ to Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1360, 400]
+    },
+    {
+      "parameters": {
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/leads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal,resolution=merge-duplicates" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($input.all().map(i => i.json)) }}",
+        "options": {}
+      },
+      "id": "insert-leads",
+      "name": "Upsert Leads to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1580, 400]
+    },
+    {
+      "parameters": {
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/interactions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"lead_ingestion\",\n  \"channel\": \"scraper\",\n  \"subject\": \"CNPJ Enrichment Complete\",\n  \"metadata\": {\n    \"source\": \"cnpj_receita_federal\",\n    \"states\": {{ JSON.stringify($('Configure CNPJ Search').first().json.targetStates) }},\n    \"leads_found\": {{ $input.all().length }},\n    \"scraped_at\": \"{{ new Date().toISOString() }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "log-enrichment",
+      "name": "Log Enrichment Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1800, 400]
+    }
+  ],
+  "connections": {
+    "Bi-Weekly Wed 7AM": { "main": [[{ "node": "Configure CNPJ Search", "type": "main", "index": 0 }]] },
+    "Manual Trigger": { "main": [[{ "node": "Configure CNPJ Search", "type": "main", "index": 0 }]] },
+    "Configure CNPJ Search": { "main": [[{ "node": "Fetch Existing CNPJs", "type": "main", "index": 0 }]] },
+    "Fetch Existing CNPJs": { "main": [[{ "node": "Build CNPJ Query", "type": "main", "index": 0 }]] },
+    "Build CNPJ Query": { "main": [[{ "node": "Search CNPJ Database", "type": "main", "index": 0 }]] },
+    "Search CNPJ Database": { "main": [[{ "node": "Transform CNPJ to Leads", "type": "main", "index": 0 }]] },
+    "Transform CNPJ to Leads": { "main": [[{ "node": "Upsert Leads to Supabase", "type": "main", "index": 0 }]] },
+    "Upsert Leads to Supabase": { "main": [[{ "node": "Log Enrichment Result", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 1800
+  },
+  "tags": [
+    { "name": "outbound" },
+    { "name": "ingestion" },
+    { "name": "enrichment" }
+  ]
+}

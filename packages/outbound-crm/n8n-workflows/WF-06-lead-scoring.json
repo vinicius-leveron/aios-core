@@ -80,6 +80,56 @@
     },
     {
       "parameters": {
+        "operation": "getAll",
+        "schema": "public",
+        "table": "leads",
+        "returnAll": false,
+        "limit": 1,
+        "filters": {
+          "conditions": [{ "keyName": "id", "condition": "eq", "keyValue": "={{ $json.lead_id }}" }]
+        }
+      },
+      "id": "fetch-lead-data",
+      "name": "Fetch Lead Data",
+      "type": "n8n-nodes-base.supabase",
+      "position": [650, 300],
+      "typeVersion": 1,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CONFIGURE_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Outbound CRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/leads?id=eq.{{ $json.lead_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"lead_score\": {{ $json.new_score }}\n}",
+        "options": {}
+      },
+      "id": "update-lead-score",
+      "name": "Update Lead Score",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1350, 400],
+      "typeVersion": 4.2,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "CONFIGURE_NOTIFICATION_WEBHOOK_URL",
         "sendBody": true,
@@ -89,7 +139,7 @@
       "id": "notify-hot-lead",
       "name": "Notify: Hot Lead!",
       "type": "n8n-nodes-base.httpRequest",
-      "position": [1350, 200],
+      "position": [1600, 200],
       "typeVersion": 4.2,
       "continueOnFail": true
     }
@@ -97,13 +147,14 @@
   "connections": {
     "Interaction Webhook": { "main": [[{ "node": "Route: Score", "type": "main", "index": 0 }]] },
     "Weekly Decay (Sunday 11PM)": { "main": [[{ "node": "Route: Decay", "type": "main", "index": 0 }]] },
-    "Route: Score": { "main": [[{ "node": "Scoring Engine", "type": "main", "index": 0 }]] },
+    "Route: Score": { "main": [[{ "node": "Fetch Lead Data", "type": "main", "index": 0 }]] },
+    "Fetch Lead Data": { "main": [[{ "node": "Scoring Engine", "type": "main", "index": 0 }]] },
     "Route: Decay": { "main": [[{ "node": "Decay Engine", "type": "main", "index": 0 }]] },
     "Scoring Engine": { "main": [[{ "node": "Crossed Hot Threshold?", "type": "main", "index": 0 }]] },
     "Crossed Hot Threshold?": {
       "main": [
-        [{ "node": "Notify: Hot Lead!", "type": "main", "index": 0 }],
-        []
+        [{ "node": "Notify: Hot Lead!", "type": "main", "index": 0 }, { "node": "Update Lead Score", "type": "main", "index": 0 }],
+        [{ "node": "Update Lead Score", "type": "main", "index": 0 }]
       ]
     }
   },

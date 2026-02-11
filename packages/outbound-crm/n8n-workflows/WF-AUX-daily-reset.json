@@ -4,7 +4,7 @@
     {
       "parameters": {
         "rule": {
-          "interval": [{ "field": "cronExpression", "expression": "0 0 * * *" }]
+          "interval": [{ "field": "cronExpression", "expression": "0 3 * * *" }]
         }
       },
       "id": "midnight-cron",
@@ -15,19 +15,55 @@
       "notes": "Runs at 00:00 BRT (03:00 UTC) daily"
     },
     {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [250, 500],
+      "typeVersion": 1
+    },
+    {
       "parameters": {
-        "jsCode": "// Reset sent_today to 0 for all email domains\n// Uses Supabase RPC or direct SQL\nreturn [{\n  json: {\n    query: 'UPDATE email_domains SET sent_today = 0',\n    reset_at: new Date().toISOString()\n  }\n}];"
+        "method": "PATCH",
+        "url": "CONFIGURE_SUPABASE_URL/rest/v1/email_domains?active=eq.true",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Authorization", "value": "Bearer CONFIGURE_SUPABASE_SERVICE_KEY" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{ \"sent_today\": 0 }",
+        "options": { "timeout": 10000 }
       },
       "id": "reset-counters",
       "name": "Reset Domain Counters",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [500, 400],
+      "typeVersion": 4,
+      "notes": "Resets sent_today = 0 for all active email domains via Supabase REST API"
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nconst domainsReset = Array.isArray(result) ? result.length : 0;\nconsole.log(`Reset ${domainsReset} domain counters at ${new Date().toISOString()}`);\nreturn [{ json: { domains_reset: domainsReset, reset_at: new Date().toISOString(), status: 'success' } }];"
+      },
+      "id": "log-result",
+      "name": "Log Reset Result",
       "type": "n8n-nodes-base.code",
-      "position": [500, 300],
-      "typeVersion": 2,
-      "notes": "CONFIGURE: Replace with Supabase update query to reset sent_today = 0 for all domains"
+      "position": [750, 400],
+      "typeVersion": 2
     }
   ],
   "connections": {
-    "Daily Midnight BRT": { "main": [[{ "node": "Reset Domain Counters", "type": "main", "index": 0 }]] }
+    "Daily Midnight BRT": { "main": [[{ "node": "Reset Domain Counters", "type": "main", "index": 0 }]] },
+    "Manual Trigger": { "main": [[{ "node": "Reset Domain Counters", "type": "main", "index": 0 }]] },
+    "Reset Domain Counters": { "main": [[{ "node": "Log Reset Result", "type": "main", "index": 0 }]] }
   },
   "settings": { "executionOrder": "v1" },
   "tags": [{ "name": "outbound" }, { "name": "leveron" }, { "name": "auxiliary" }]
