@@ -1,0 +1,38 @@
+{
+  "name": "@synkra/n8n-validator",
+  "version": "1.0.0",
+  "description": "CLI tool to validate, auto-fix, and deploy n8n workflow JSON files",
+  "type": "module",
+  "bin": {
+    "n8n-validator": "./bin/cli.mjs"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "keywords": [
+    "n8n",
+    "workflow",
+    "validator",
+    "automation",
+    "cli"
+  ],
+  "author": "Synkra AIOS Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SynkraAI/aios-core.git",
+    "directory": "packages/n8n-validator"
+  },
+  "bugs": {
+    "url": "https://github.com/SynkraAI/aios-core/issues"
+  },
+  "homepage": "https://github.com/SynkraAI/aios-core/tree/main/packages/n8n-validator#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
