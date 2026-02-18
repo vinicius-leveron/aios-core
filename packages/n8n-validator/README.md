@@ -1,4 +1,4 @@
-# @synkra/n8n-validator
+# @vinicius-leveron/n8n-validator
 
 Validate, auto-fix, and deploy n8n workflow JSON files.
 
@@ -9,7 +9,7 @@ Zero external dependencies. Requires Node.js 18+.
 ## Programmatic API
 
 ```javascript
-import { validateWorkflow, fixWorkflow, deployWorkflow } from '@synkra/n8n-validator'
+import { validateWorkflow, fixWorkflow, deployWorkflow } from '@vinicius-leveron/n8n-validator'
 
 // Validate a workflow
 const result = validateWorkflow(workflow)
@@ -42,10 +42,10 @@ if (result.summary.errors > 0) {
 
 ```bash
 # Run directly with npx (no install needed)
-npx @synkra/n8n-validator --help
+npx @vinicius-leveron/n8n-validator --help
 
 # Or install globally
-npm install -g @synkra/n8n-validator
+npm install -g @vinicius-leveron/n8n-validator
 n8n-validator --help
 ```
 

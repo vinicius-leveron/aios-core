@@ -1,5 +1,5 @@
 {
-  "name": "@synkra/n8n-validator-mcp",
+  "name": "@vinicius-leveron/n8n-validator-mcp",
   "version": "1.0.0",
   "description": "MCP server for n8n workflow validation, auto-fix, and deployment",
   "type": "module",
@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@vinicius-leveron/n8n-validator": "^1.0.0",
     "zod": "^3.23.0"
   },
   "keywords": [

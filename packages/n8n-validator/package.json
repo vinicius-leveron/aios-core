@@ -1,5 +1,5 @@
 {
-  "name": "@synkra/n8n-validator",
+  "name": "@vinicius-leveron/n8n-validator",
   "version": "1.0.0",
   "description": "Validate, auto-fix, and deploy n8n workflow JSON files - CLI and programmatic API",
   "type": "module",

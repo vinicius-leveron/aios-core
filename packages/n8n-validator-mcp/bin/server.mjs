@@ -16,7 +16,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 
 // Import validator functions (relative path for monorepo, will work with npm too)
-import { validateWorkflow, fixWorkflow, deployWorkflow } from '../../n8n-validator/lib/index.mjs'
+import { validateWorkflow, fixWorkflow, deployWorkflow } from '@vinicius-leveron/n8n-validator'
 
 // ============================================================================
 // SCHEMAS
