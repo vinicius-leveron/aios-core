@@ -1,8 +1,13 @@
 {
   "name": "@synkra/n8n-validator",
   "version": "1.0.0",
-  "description": "CLI tool to validate, auto-fix, and deploy n8n workflow JSON files",
+  "description": "Validate, auto-fix, and deploy n8n workflow JSON files - CLI and programmatic API",
   "type": "module",
+  "main": "./lib/index.mjs",
+  "exports": {
+    ".": "./lib/index.mjs",
+    "./cli": "./bin/cli.mjs"
+  },
   "bin": {
     "n8n-validator": "./bin/cli.mjs"
   },

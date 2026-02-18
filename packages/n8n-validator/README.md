@@ -1,10 +1,44 @@
 # @synkra/n8n-validator
 
-CLI tool to validate, auto-fix, and deploy n8n workflow JSON files.
+Validate, auto-fix, and deploy n8n workflow JSON files.
+
+**Two modes:** CLI for manual use, programmatic API for integration.
 
 Zero external dependencies. Requires Node.js 18+.
 
-## Installation
+## Programmatic API
+
+```javascript
+import { validateWorkflow, fixWorkflow, deployWorkflow } from '@synkra/n8n-validator'
+
+// Validate a workflow
+const result = validateWorkflow(workflow)
+console.log(result.summary) // { errors: 2, warnings: 1, verdict: 'FAIL' }
+
+// Auto-fix issues
+if (result.summary.errors > 0) {
+  const { workflow: fixed, changelog } = fixWorkflow(workflow, result)
+  console.log(`Fixed ${changelog.length} issues`)
+
+  // Deploy to n8n
+  const deployResult = await deployWorkflow(
+    'https://n8n.example.com',
+    'YOUR_API_KEY',
+    fixed
+  )
+}
+```
+
+### API Reference
+
+| Function | Description |
+|----------|-------------|
+| `validateWorkflow(workflow)` | Returns `{ issues, summary, workflow, credentialSummary }` |
+| `fixWorkflow(workflow, result)` | Returns `{ workflow, changelog }` |
+| `deployWorkflow(url, apiKey, workflow)` | Returns `{ success, message }` |
+| `SEVERITY` | Enum: `ERROR`, `WARNING`, `INFO` |
+
+## CLI Installation
 
 ```bash
 # Run directly with npx (no install needed)
