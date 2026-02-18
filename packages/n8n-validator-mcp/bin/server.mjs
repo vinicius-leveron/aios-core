@@ -47,6 +47,31 @@ const ListWorkflowsSchema = z.object({
     .describe('n8n API key (defaults to N8N_API_KEY env var)')
 })
 
+const WorkflowIdSchema = z.object({
+  workflowId: z.string()
+    .describe('The workflow ID'),
+  url: z.string()
+    .optional()
+    .describe('n8n instance URL (defaults to N8N_URL env var)'),
+  apiKey: z.string()
+    .optional()
+    .describe('n8n API key (defaults to N8N_API_KEY env var)')
+})
+
+const ExecuteWorkflowSchema = z.object({
+  workflowId: z.string()
+    .describe('The workflow ID to execute'),
+  inputData: z.string()
+    .optional()
+    .describe('Optional JSON input data for the workflow'),
+  url: z.string()
+    .optional()
+    .describe('n8n instance URL (defaults to N8N_URL env var)'),
+  apiKey: z.string()
+    .optional()
+    .describe('n8n API key (defaults to N8N_API_KEY env var)')
+})
+
 // ============================================================================
 // HELPERS
 // ============================================================================
@@ -242,6 +267,225 @@ server.tool(
         content: [{
           type: 'text',
           text: JSON.stringify(response, null, 2)
+        }]
+      }
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: `Error: ${error.message}`
+        }],
+        isError: true
+      }
+    }
+  }
+)
+
+// Tool: Get Workflow
+server.tool(
+  'n8n_get_workflow',
+  'Gets a specific workflow by ID from n8n. Returns the full workflow JSON.',
+  WorkflowIdSchema.shape,
+  async (params) => {
+    try {
+      const { url, apiKey } = getN8nConfig(params)
+
+      const response = await fetch(`${url}/api/v1/workflows/${params.workflowId}`, {
+        headers: {
+          'X-N8N-API-KEY': apiKey,
+          'Accept': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error(`n8n API error: ${response.status} ${response.statusText}`)
+      }
+
+      const workflow = await response.json()
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(workflow, null, 2)
+        }]
+      }
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: `Error: ${error.message}`
+        }],
+        isError: true
+      }
+    }
+  }
+)
+
+// Tool: Activate Workflow
+server.tool(
+  'n8n_activate_workflow',
+  'Activates a workflow in n8n so it starts running automatically based on its triggers.',
+  WorkflowIdSchema.shape,
+  async (params) => {
+    try {
+      const { url, apiKey } = getN8nConfig(params)
+
+      const response = await fetch(`${url}/api/v1/workflows/${params.workflowId}/activate`, {
+        method: 'POST',
+        headers: {
+          'X-N8N-API-KEY': apiKey,
+          'Accept': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error(`n8n API error: ${response.status} ${response.statusText}`)
+      }
+
+      const result = await response.json()
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ success: true, active: result.active, workflowId: params.workflowId }, null, 2)
+        }]
+      }
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: `Error: ${error.message}`
+        }],
+        isError: true
+      }
+    }
+  }
+)
+
+// Tool: Deactivate Workflow
+server.tool(
+  'n8n_deactivate_workflow',
+  'Deactivates a workflow in n8n so it stops running automatically.',
+  WorkflowIdSchema.shape,
+  async (params) => {
+    try {
+      const { url, apiKey } = getN8nConfig(params)
+
+      const response = await fetch(`${url}/api/v1/workflows/${params.workflowId}/deactivate`, {
+        method: 'POST',
+        headers: {
+          'X-N8N-API-KEY': apiKey,
+          'Accept': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error(`n8n API error: ${response.status} ${response.statusText}`)
+      }
+
+      const result = await response.json()
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ success: true, active: result.active, workflowId: params.workflowId }, null, 2)
+        }]
+      }
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: `Error: ${error.message}`
+        }],
+        isError: true
+      }
+    }
+  }
+)
+
+// Tool: Delete Workflow
+server.tool(
+  'n8n_delete_workflow',
+  'Deletes a workflow from n8n. This action is irreversible.',
+  WorkflowIdSchema.shape,
+  async (params) => {
+    try {
+      const { url, apiKey } = getN8nConfig(params)
+
+      const response = await fetch(`${url}/api/v1/workflows/${params.workflowId}`, {
+        method: 'DELETE',
+        headers: {
+          'X-N8N-API-KEY': apiKey,
+          'Accept': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error(`n8n API error: ${response.status} ${response.statusText}`)
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ success: true, deleted: true, workflowId: params.workflowId }, null, 2)
+        }]
+      }
+    } catch (error) {
+      return {
+        content: [{
+          type: 'text',
+          text: `Error: ${error.message}`
+        }],
+        isError: true
+      }
+    }
+  }
+)
+
+// Tool: Execute Workflow
+server.tool(
+  'n8n_execute_workflow',
+  'Executes a workflow manually in n8n. Optionally accepts input data.',
+  ExecuteWorkflowSchema.shape,
+  async (params) => {
+    try {
+      const { url, apiKey } = getN8nConfig(params)
+
+      const body = {}
+      if (params.inputData) {
+        try {
+          body.data = JSON.parse(params.inputData)
+        } catch {
+          throw new Error('Invalid inputData JSON')
+        }
+      }
+
+      const response = await fetch(`${url}/api/v1/workflows/${params.workflowId}/run`, {
+        method: 'POST',
+        headers: {
+          'X-N8N-API-KEY': apiKey,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(`n8n API error: ${response.status} ${response.statusText} - ${text}`)
+      }
+
+      const result = await response.json()
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            executionId: result.data?.executionId || result.executionId,
+            workflowId: params.workflowId,
+            result: result.data || result
+          }, null, 2)
         }]
       }
     } catch (error) {

@@ -1,6 +1,6 @@
 {
   "name": "@vinicius-leveron/n8n-validator-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MCP server for n8n workflow validation, auto-fix, and deployment",
   "type": "module",
   "bin": {
