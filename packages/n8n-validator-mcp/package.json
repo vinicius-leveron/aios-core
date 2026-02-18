@@ -1,0 +1,37 @@
+{
+  "name": "@synkra/n8n-validator-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for n8n workflow validation, auto-fix, and deployment",
+  "type": "module",
+  "bin": {
+    "n8n-validator-mcp": "./bin/server.mjs"
+  },
+  "files": [
+    "bin/"
+  ],
+  "scripts": {
+    "start": "node bin/server.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "keywords": [
+    "n8n",
+    "mcp",
+    "workflow",
+    "validator",
+    "claude",
+    "automation"
+  ],
+  "author": "Synkra AIOS Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SynkraAI/aios-core.git",
+    "directory": "packages/n8n-validator-mcp"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

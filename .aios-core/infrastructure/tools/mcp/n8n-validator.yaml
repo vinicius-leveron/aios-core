@@ -1,0 +1,64 @@
+tool:
+  schema_version: 1.0
+  id: n8n-validator
+  type: mcp
+  name: n8n Workflow Validator
+  version: 1.0.0
+  description: |
+    MCP server for validating, auto-fixing, and deploying n8n workflow JSON files.
+    Use this to ensure workflows are valid before deployment, automatically fix
+    common issues, and deploy directly to your n8n instance.
+
+  mcp_specific:
+    server_command: "npx -y @synkra/n8n-validator-mcp"
+    transport: stdio
+    environment_variables:
+      - name: N8N_URL
+        required: true
+        description: URL of your n8n instance (e.g., https://n8n.example.com)
+      - name: N8N_API_KEY
+        required: true
+        description: API key for n8n authentication
+    health_check:
+      method: tool_call
+      command: n8n_list_workflows
+      timeout_ms: 10000
+
+  tools:
+    - id: n8n_validate_workflow
+      description: |
+        Validates an n8n workflow JSON and returns any issues found.
+        Use this to check if a workflow is valid before deploying.
+      parameters:
+        - workflow: "The n8n workflow as a JSON string"
+
+    - id: n8n_fix_workflow
+      description: |
+        Automatically fixes common issues in an n8n workflow JSON.
+        Returns the fixed workflow and a changelog of what was changed.
+      parameters:
+        - workflow: "The n8n workflow as a JSON string"
+
+    - id: n8n_deploy_workflow
+      description: |
+        Deploys a workflow to an n8n instance.
+        Creates a new workflow or updates existing one if workflow has an ID.
+      parameters:
+        - workflow: "The n8n workflow as a JSON string"
+        - url: "n8n instance URL (optional, uses N8N_URL env var)"
+        - apiKey: "n8n API key (optional, uses N8N_API_KEY env var)"
+
+    - id: n8n_list_workflows
+      description: |
+        Lists all workflows from an n8n instance.
+        Returns workflow names, IDs, and active status.
+      parameters:
+        - url: "n8n instance URL (optional, uses N8N_URL env var)"
+        - apiKey: "n8n API key (optional, uses N8N_API_KEY env var)"
+
+  keywords:
+    - n8n
+    - workflow
+    - automation
+    - validator
+    - deployment
